@@ -12,6 +12,7 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
   const router = useRouter();
 
   async function handleSignup(e: React.FormEvent) {
@@ -29,6 +30,9 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
 
     if (error) {
@@ -37,8 +41,52 @@ export default function SignupPage() {
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    setEmailSent(true);
+    setLoading(false);
+  }
+
+  if (emailSent) {
+    return (
+      <div className="page-container" style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minHeight: "100dvh", paddingBottom: 20 }}>
+        <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, var(--accent) 0%, #9b7eef 100%)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.8rem",
+              marginBottom: 16,
+              boxShadow: "0 4px 16px rgba(124, 92, 231, 0.25)",
+            }}
+          >
+            ✉️
+          </div>
+          <h1 style={{ fontSize: "1.6rem", fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 8 }}>
+            Check your email
+          </h1>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 4 }}>
+            We sent a confirmation link to
+          </p>
+          <p style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: 24 }}>
+            {email}
+          </p>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", lineHeight: 1.5 }}>
+            Click the link in the email to verify your account, then come back here to sign in.
+          </p>
+          <Link
+            href="/login"
+            className="btn-primary"
+            style={{ display: "inline-block", marginTop: 24, padding: "12px 32px", textDecoration: "none" }}
+          >
+            Go to Sign In
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
