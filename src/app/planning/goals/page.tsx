@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getBreakdownPreferences, saveBreakdownPreferences } from "@/lib/store";
 import type { BreakdownPreference } from "@/lib/types";
+import { Card, PageHeader, IconBox, FreqBadge } from "@/components";
+
+const allGoalTypes = [
+  { type: "breath hold", icon: "🫁", desc: "Breath-hold training and apnea work" },
+  { type: "surf", icon: "🏄", desc: "Surfing preparation and paddle fitness" },
+  { type: "shoulder", icon: "💪", desc: "Shoulder strength and stability" },
+  { type: "back", icon: "🔙", desc: "Back health and posture improvement" },
+  { type: "joints", icon: "🦴", desc: "Joint mobility and injury prevention" },
+];
 
 export default function GoalsScreen() {
   const [prefs, setPrefs] = useState<BreakdownPreference[]>([]);
@@ -16,14 +25,11 @@ export default function GoalsScreen() {
 
   function toggleGoal(type: string) {
     setPrefs((prev) => {
-      // If it's currently a specific goal, remove it; otherwise add it
       let updated: BreakdownPreference[];
       const existing = prev.find((p) => p.type === type);
       if (existing) {
-        // Remove from prefs (uncheck)
         updated = prev.filter((p) => p.type !== type);
       } else {
-        // Add back
         updated = [...prev, { type, frequency: 1, isSpecificGoal: true }];
       }
       saveBreakdownPreferences(updated);
@@ -41,57 +47,73 @@ export default function GoalsScreen() {
     });
   }
 
-  const allGoalTypes = [
-    "breath hold",
-    "surf",
-    "shoulder",
-    "back",
-    "joints",
-  ];
-
   return (
-    <div style={{ padding: 24, minHeight: "100dvh" }}>
+    <div className="page-container">
       <Link href="/planning" className="back-btn">← Planning</Link>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 16 }}>Specific Goals</h1>
-      <p style={{ color: "var(--text-muted)", marginTop: 4 }}>
-        Check goals to include them in your workout planning.
-      </p>
+      <PageHeader title="Specific Goals" subtitle="Enable goals to include them in your workout planning" />
 
-      <div style={{ marginTop: 20 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {allGoalTypes.map((goal) => {
-          const pref = specificGoals.find((p) => p.type === goal);
+          const pref = specificGoals.find((p) => p.type === goal.type);
           const isChecked = !!pref;
           return (
-            <div key={goal} className="card" style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={isChecked}
-                  onChange={() => toggleGoal(goal)}
-                  style={{ width: 20, height: 20 }}
+            <Card key={goal.type} style={{ padding: 0, overflow: "hidden" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", cursor: "pointer" }}
+                onClick={() => toggleGoal(goal.type)}
+              >
+                <IconBox
+                  icon={goal.icon}
+                  bg={isChecked ? "var(--accent-soft)" : "var(--bg-surface)"}
                 />
-                <span style={{ fontWeight: 600, textTransform: "capitalize", flex: 1 }}>
-                  {goal}
-                </span>
-                {isChecked && (
-                  <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: "0.9rem" }}>
-                    {pref!.frequency}x/week
-                  </span>
-                )}
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontWeight: 600, fontSize: "0.9rem", textTransform: "capitalize", marginBottom: 2 }}>
+                    {goal.type}
+                  </p>
+                  <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", lineHeight: 1.3 }}>
+                    {goal.desc}
+                  </p>
+                </div>
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    border: isChecked ? "none" : "2px solid var(--border)",
+                    background: isChecked ? "var(--accent)" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "0.65rem",
+                    color: "#fff",
+                    fontWeight: 700,
+                    flexShrink: 0,
+                    transition: "all var(--transition)",
+                  }}
+                >
+                  {isChecked && "✓"}
+                </div>
               </div>
               {isChecked && (
-                <div style={{ marginTop: 8, marginLeft: 32 }}>
+                <div
+                  className="animate-in"
+                  style={{ padding: "0 18px 16px", borderTop: "1px solid var(--border)" }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, marginTop: 12 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Frequency</span>
+                    <FreqBadge value={pref!.frequency} />
+                  </div>
                   <input
                     type="range"
                     min={1}
                     max={7}
                     value={pref!.frequency}
-                    onChange={(e) => updateFreq(goal, Number(e.target.value))}
+                    onChange={(e) => updateFreq(goal.type, Number(e.target.value))}
                     className="slider-track"
                   />
                 </div>
               )}
-            </div>
+            </Card>
           );
         })}
       </div>

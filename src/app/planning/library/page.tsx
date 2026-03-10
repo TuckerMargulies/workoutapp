@@ -2,15 +2,27 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getExercises, getWorkoutGroups, saveExercises, saveWorkoutGroups } from "@/lib/store";
+import { getExercises, getWorkoutGroups, saveExercises } from "@/lib/store";
 import type { Exercise, WorkoutGroup } from "@/lib/types";
+import { Card, PageHeader, PillTabs, Tag } from "@/components";
+
+const typeColors: Record<string, string> = {
+  resistance: "var(--accent)",
+  mobility: "var(--green)",
+  cardio: "var(--orange)",
+  "breath hold": "var(--blue)",
+  agility: "var(--orange)",
+  stability: "var(--green)",
+  rehabilitation: "var(--blue)",
+};
 
 export default function LibraryScreen() {
-  const [tab, setTab] = useState<"exercises" | "workouts">("exercises");
+  const [tab, setTab] = useState("exercises");
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [groups, setGroups] = useState<WorkoutGroup[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     setExercises(getExercises());
@@ -31,120 +43,177 @@ export default function LibraryScreen() {
     });
   }
 
+  const filteredExercises = exercises.filter((ex) =>
+    ex.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    ex.bodyArea.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    ex.type.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredGroups = groups.filter((g) =>
+    g.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div style={{ padding: 24, minHeight: "100dvh" }}>
+    <div className="page-container">
       <Link href="/planning" className="back-btn">← Planning</Link>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 16 }}>Library</h1>
+      <PageHeader title="Library" subtitle="Browse exercises and workout groups" />
+
+      {/* Search */}
+      <input
+        type="text"
+        placeholder="Search exercises..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        className="input-field"
+        style={{ marginBottom: 16 }}
+      />
 
       {/* Tab toggle */}
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <button
-          className={tab === "exercises" ? "btn-primary" : "btn-secondary"}
-          style={{ padding: "8px 16px", fontSize: "0.9rem", borderRadius: 8 }}
-          onClick={() => setTab("exercises")}
-        >
-          Exercise Library
-        </button>
-        <button
-          className={tab === "workouts" ? "btn-primary" : "btn-secondary"}
-          style={{ padding: "8px 16px", fontSize: "0.9rem", borderRadius: 8 }}
-          onClick={() => setTab("workouts")}
-        >
-          Workout Library
-        </button>
-      </div>
+      <PillTabs
+        tabs={[
+          { key: "exercises", label: "Exercises" },
+          { key: "workouts", label: "Workout Groups" },
+        ]}
+        active={tab}
+        onChange={setTab}
+        style={{ marginBottom: 20 }}
+      />
 
-      {/* Exercise list (2a1) */}
+      {/* Exercise list */}
       {tab === "exercises" && (
-        <div style={{ marginTop: 16 }}>
-          {exercises.map((ex) => (
-            <div key={ex.id} className="card" style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filteredExercises.map((ex) => (
+            <Card key={ex.id} style={{ padding: 0, overflow: "hidden" }}>
               <div
-                style={{ cursor: "pointer", fontWeight: 600 }}
+                style={{ cursor: "pointer", padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}
                 onClick={() => toggle(ex.id)}
               >
-                {ex.name}
-                <span style={{ float: "right", color: "var(--text-muted)" }}>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 3 }}>{ex.name}</p>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span
+                      style={{
+                        fontSize: "0.65rem",
+                        fontWeight: 600,
+                        color: typeColors[ex.type] || "var(--text-muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {ex.type}
+                    </span>
+                    <span style={{ color: "var(--border)" }}>·</span>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{ex.bodyArea}</span>
+                  </div>
+                </div>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>
                   {expandedId === ex.id ? "▲" : "▼"}
                 </span>
               </div>
               {expandedId === ex.id && (
-                <div style={{ marginTop: 8, fontSize: "0.9rem", color: "var(--text-muted)" }}>
+                <div
+                  className="animate-in"
+                  style={{ padding: "0 18px 16px", borderTop: "1px solid var(--border)", fontSize: "0.85rem", color: "var(--text-secondary)" }}
+                >
                   {editing ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label>
-                        Name:{" "}
-                        <input
-                          value={ex.name}
-                          onChange={(e) => handleExerciseFieldChange(ex.id, "name", e.target.value)}
-                          style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 6, padding: 4, color: "var(--text)" }}
-                        />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 12 }}>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>Name</span>
+                        <input value={ex.name} onChange={(e) => handleExerciseFieldChange(ex.id, "name", e.target.value)} className="input-field" />
                       </label>
-                      <label>
-                        Type:{" "}
-                        <input
-                          value={ex.type}
-                          onChange={(e) => handleExerciseFieldChange(ex.id, "type", e.target.value)}
-                          style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 6, padding: 4, color: "var(--text)" }}
-                        />
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>Type</span>
+                        <input value={ex.type} onChange={(e) => handleExerciseFieldChange(ex.id, "type", e.target.value)} className="input-field" />
                       </label>
-                      <label>
-                        Body Area:{" "}
-                        <input
-                          value={ex.bodyArea}
-                          onChange={(e) => handleExerciseFieldChange(ex.id, "bodyArea", e.target.value)}
-                          style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 6, padding: 4, color: "var(--text)" }}
-                        />
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>Body Area</span>
+                        <input value={ex.bodyArea} onChange={(e) => handleExerciseFieldChange(ex.id, "bodyArea", e.target.value)} className="input-field" />
                       </label>
                     </div>
                   ) : (
-                    <>
-                      <p><strong>Body area:</strong> {ex.bodyArea}</p>
-                      <p><strong>Type:</strong> {ex.type}</p>
-                      <p><strong>Equipment:</strong> {ex.equipment.length > 0 ? ex.equipment.join(", ") : "None"}</p>
-                      <p><strong>Setting:</strong> {ex.setting}</p>
-                      <p><strong>Applications:</strong> {ex.applications.length > 0 ? ex.applications.join(", ") : "General"}</p>
-                      <p><strong>Default:</strong> {ex.timeBased ? `${Math.round(ex.defaultTimeSec / 60)} min` : `${ex.defaultReps} reps`}</p>
-                    </>
+                    <div style={{ paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 16 }}>
+                        <span style={{ color: "var(--text-muted)" }}>Equipment</span>
+                        <span>{ex.equipment.length > 0 ? ex.equipment.join(", ") : "None"}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 16 }}>
+                        <span style={{ color: "var(--text-muted)" }}>Setting</span>
+                        <span style={{ textTransform: "capitalize" }}>{ex.setting}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 16 }}>
+                        <span style={{ color: "var(--text-muted)" }}>Default</span>
+                        <span>{ex.timeBased ? `${Math.round(ex.defaultTimeSec / 60)} min` : `${ex.defaultReps} reps`}</span>
+                      </div>
+                      {ex.applications.length > 0 && (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                          {ex.applications.map((a) => (
+                            <Tag key={a}>{a}</Tag>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
+            </Card>
           ))}
         </div>
       )}
 
-      {/* Workout groups (2a2) */}
+      {/* Workout groups */}
       {tab === "workouts" && (
-        <div style={{ marginTop: 16 }}>
-          {groups.map((grp) => {
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filteredGroups.map((grp) => {
             const grpExercises = exercises.filter((e) => grp.exerciseIds.includes(e.id));
             return (
-              <div key={grp.id} className="card" style={{ marginBottom: 8 }}>
-                <div style={{ cursor: "pointer", fontWeight: 600 }} onClick={() => toggle(grp.id)}>
-                  {grp.name}
-                  <span style={{ float: "right", color: "var(--text-muted)" }}>
-                    {expandedId === grp.id ? "▲" : "▼"}
-                  </span>
-                </div>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                  {grp.types.join(", ")} · {grp.bodyAreas.join(", ")}
-                  {grp.applications.length > 0 && ` · ${grp.applications.join(", ")}`}
+              <Card key={grp.id} style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ cursor: "pointer", padding: "14px 18px" }} onClick={() => toggle(grp.id)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <p style={{ fontWeight: 600, fontSize: "0.9rem" }}>{grp.name}</p>
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>
+                      {expandedId === grp.id ? "▲" : "▼"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                    {grp.types.map((t) => (
+                      <span
+                        key={t}
+                        style={{
+                          fontSize: "0.65rem",
+                          fontWeight: 600,
+                          color: typeColors[t] || "var(--text-muted)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                    <span style={{ color: "var(--border)" }}>·</span>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{grpExercises.length} exercises</span>
+                  </div>
                 </div>
                 {expandedId === grp.id && (
-                  <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: "0.9rem" }}>
+                  <div className="animate-in" style={{ padding: "0 18px 14px", borderTop: "1px solid var(--border)" }}>
                     {grpExercises.map((ex) => (
-                      <li key={ex.id} style={{ marginBottom: 4 }}>
-                        {ex.name}{" "}
-                        <span style={{ color: "var(--text-muted)" }}>
-                          — {ex.bodyArea}, {ex.type}
-                          {ex.equipment.length > 0 ? `, ${ex.equipment.join("+")}` : ""}
-                        </span>
-                      </li>
+                      <div
+                        key={ex.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "8px 0",
+                          borderBottom: "1px solid var(--border)",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        <span>{ex.name}</span>
+                        <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{ex.bodyArea}</span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
@@ -153,7 +222,8 @@ export default function LibraryScreen() {
       {/* Edit button */}
       <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
         <button
-          className="btn-secondary"
+          className={editing ? "btn-primary" : "btn-accent-outline"}
+          style={{ padding: "10px 28px" }}
           onClick={() => setEditing(!editing)}
         >
           {editing ? "Done Editing" : "Edit Library"}

@@ -4,6 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getBreakdownPreferences, saveBreakdownPreferences } from "@/lib/store";
 import type { BreakdownPreference } from "@/lib/types";
+import { Card, PageHeader, SectionHeader, FreqBadge } from "@/components";
+
+const freqLabels: Record<number, string> = {
+  1: "Rarely",
+  2: "Occasional",
+  3: "Moderate",
+  4: "Regular",
+  5: "Frequent",
+  6: "Very High",
+  7: "Daily",
+};
+
+const typeIcons: Record<string, string> = {
+  resistance: "🏋️",
+  mobility: "🧘",
+  cardio: "🏃",
+};
 
 export default function BreakdownScreen() {
   const [prefs, setPrefs] = useState<BreakdownPreference[]>([]);
@@ -26,19 +43,19 @@ export default function BreakdownScreen() {
   const specificGoals = prefs.filter((p) => p.isSpecificGoal);
 
   return (
-    <div style={{ padding: 24, minHeight: "100dvh" }}>
+    <div className="page-container">
       <Link href="/planning" className="back-btn">← Planning</Link>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 16 }}>Breakdown</h1>
-      <p style={{ color: "var(--text-muted)", marginTop: 4 }}>
-        Set how often you want each type of exercise.
-      </p>
+      <PageHeader title="Breakdown" subtitle="Set priority and frequency for each exercise type" />
 
-      <div style={{ marginTop: 20 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {mainTypes.map((p) => (
-          <div key={p.type} className="card" style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{p.type}</span>
-              <span style={{ color: "var(--accent)", fontWeight: 700 }}>{p.frequency}x/week</span>
+          <Card key={p.type}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: "1.2rem" }}>{typeIcons[p.type] || "🔹"}</span>
+                <span style={{ fontWeight: 600, fontSize: "0.9rem", textTransform: "capitalize" }}>{p.type}</span>
+              </div>
+              <FreqBadge value={p.frequency} />
             </div>
             <input
               type="range"
@@ -48,17 +65,22 @@ export default function BreakdownScreen() {
               onChange={(e) => updateFreq(p.type, Number(e.target.value))}
               className="slider-track"
             />
-          </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+              <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>
+                {freqLabels[p.frequency] || ""}
+              </span>
+            </div>
+          </Card>
         ))}
 
         {specificGoals.length > 0 && (
           <>
-            <h2 style={{ fontWeight: 600, marginTop: 20, marginBottom: 12 }}>Specific Goals</h2>
+            <SectionHeader title="Specific Goals" style={{ marginTop: 8 }} />
             {specificGoals.map((p) => (
-              <div key={p.type} className="card" style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{p.type}</span>
-                  <span style={{ color: "var(--accent)", fontWeight: 700 }}>{p.frequency}x/week</span>
+              <Card key={p.type}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ fontWeight: 600, fontSize: "0.9rem", textTransform: "capitalize" }}>{p.type}</span>
+                  <FreqBadge value={p.frequency} />
                 </div>
                 <input
                   type="range"
@@ -68,7 +90,7 @@ export default function BreakdownScreen() {
                   onChange={(e) => updateFreq(p.type, Number(e.target.value))}
                   className="slider-track"
                 />
-              </div>
+              </Card>
             ))}
           </>
         )}

@@ -9,6 +9,7 @@ import {
   saveCurrentPlan,
 } from "@/lib/store";
 import type { WorkoutPlan, PlannedExercise } from "@/lib/types";
+import { Card, Tag, EmptyState, ProgressRing } from "@/components";
 
 export default function ExerciseScreen() {
   const router = useRouter();
@@ -55,7 +56,6 @@ export default function ExerciseScreen() {
     if (!plan) return;
     const timeSpent = Math.round((Date.now() - startTimeRef.current) / 1000);
 
-    // Update plan with actual time
     const updatedExercises = [...plan.exercises];
     if (updatedExercises[idx]) {
       updatedExercises[idx] = { ...updatedExercises[idx], timeSec: timeSpent };
@@ -79,158 +79,196 @@ export default function ExerciseScreen() {
 
   if (!plan || !exercise) {
     return (
-      <div style={{ padding: 24 }}>
-        <p style={{ color: "var(--text-muted)" }}>No workout in progress.</p>
+      <div style={{ padding: 24, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <EmptyState icon="🏋️" message="No workout in progress." />
       </div>
     );
   }
 
   const progressPct = ((idx + 1) / total) * 100;
+  const timerProgress = exercise.timeBased
+    ? Math.min(elapsed / exercise.timeSec, 1)
+    : Math.min((currentSet - 1) / exercise.sets, 1);
 
   return (
-    <div className="snap-container" style={{ position: "relative" }}>
-      {/* Progress bar (left side) */}
+    <div style={{ position: "relative", minHeight: "100dvh", background: "var(--bg)" }}>
+      {/* Top progress bar */}
       <div
         style={{
           position: "fixed",
-          left: 0,
           top: 0,
-          width: 6,
-          height: "100dvh",
-          background: "var(--bg-surface)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: "100%",
+          maxWidth: 480,
+          height: 3,
+          background: "var(--bg-elevated)",
           zIndex: 30,
         }}
       >
         <div
           style={{
-            width: "100%",
-            height: `${progressPct}%`,
+            width: `${progressPct}%`,
+            height: "100%",
             background: "var(--accent)",
-            transition: "height 0.3s",
+            transition: "width 0.4s ease",
           }}
         />
       </div>
 
-      {/* Top frame */}
-      <div className="snap-page" style={{ padding: 24, display: "flex", flexDirection: "column" }}>
-        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: 8 }}>
+      {/* Main content */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          minHeight: "100dvh",
+          padding: "60px 24px 24px",
+        }}
+      >
+        {/* Exercise counter */}
+        <span
+          style={{
+            fontSize: "0.75rem",
+            color: "var(--text-muted)",
+            fontWeight: 500,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            marginBottom: 8,
+          }}
+        >
           Exercise {idx + 1} of {total}
+        </span>
+
+        {/* Exercise name */}
+        <h1
+          style={{
+            fontSize: "1.4rem",
+            fontWeight: 700,
+            textAlign: "center",
+            marginBottom: 8,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {exercise.name}
+        </h1>
+
+        {/* Type badge */}
+        <Tag style={{ marginBottom: 32 }}>{exercise.type}</Tag>
+
+        {/* Central Timer/Set Ring */}
+        <div style={{ marginBottom: 32 }}>
+          <ProgressRing
+            progress={timerProgress}
+            size={180}
+            strokeWidth={8}
+            color={isComplete ? "var(--green)" : "var(--accent)"}
+          >
+            {exercise.timeBased ? (
+              <>
+                <span style={{ fontSize: "2.2rem", fontWeight: 700, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                  {formatTime(elapsed)}
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>
+                  / {formatTime(exercise.timeSec)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: "2.2rem", fontWeight: 700 }}>
+                  {Math.min(currentSet, exercise.sets)}/{exercise.sets}
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>
+                  {exercise.reps} reps/set
+                </span>
+              </>
+            )}
+          </ProgressRing>
         </div>
 
-        <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 16 }}>{exercise.name}</h1>
-
-        {/* Timer / Set tracker */}
+        {/* Controls */}
         {exercise.timeBased ? (
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ fontSize: "3rem", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-              {formatTime(elapsed)} / {formatTime(exercise.timeSec)}
-            </div>
-            {exercise.reps > 0 && (
-              <div style={{ color: "var(--text-muted)", marginTop: 4 }}>
-                Goal: {exercise.reps} reps
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 16 }}>
-              <button className="btn-secondary" onClick={() => setRunning(!running)}>
-                {running ? "⏸ Pause" : "▶ Play"}
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  setRunning(false);
-                  setElapsed(0);
-                }}
-              >
-                ⏹ Stop
-              </button>
-            </div>
+          <div style={{ display: "flex", gap: 12, marginBottom: 32 }}>
+            <button
+              className="btn-secondary"
+              style={{ padding: "10px 28px", fontSize: "0.85rem" }}
+              onClick={() => setRunning(!running)}
+            >
+              {running ? "⏸ Pause" : "▶ Start"}
+            </button>
+            <button
+              className="btn-ghost"
+              style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+              onClick={() => { setRunning(false); setElapsed(0); }}
+            >
+              Reset
+            </button>
           </div>
         ) : (
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ fontSize: "2.5rem", fontWeight: 700 }}>
-              Set {Math.min(currentSet, exercise.sets)} / {exercise.sets}
-            </div>
-            <div style={{ color: "var(--text-muted)", marginTop: 4 }}>
-              {exercise.reps} reps per set
-            </div>
+          <div style={{ marginBottom: 32 }}>
             <button
               className="btn-primary"
-              style={{ marginTop: 16 }}
+              style={{
+                padding: "12px 40px",
+                fontSize: "0.9rem",
+                background: currentSet > exercise.sets ? "var(--green)" : undefined,
+                boxShadow: currentSet > exercise.sets ? "0 2px 12px rgba(46,204,113,0.3)" : undefined,
+              }}
               onClick={() => setCurrentSet((s) => s + 1)}
               disabled={currentSet > exercise.sets}
             >
-              {currentSet > exercise.sets ? "All sets done ✓" : "Log Set ✓"}
+              {currentSet > exercise.sets ? "✓ All Sets Complete" : "Complete Set ✓"}
             </button>
           </div>
         )}
 
-        {/* Scroll hint */}
-        <div
-          style={{
-            marginTop: "auto",
-            textAlign: "center",
-            color: "var(--text-muted)",
-            fontSize: "0.85rem",
-            cursor: "pointer",
-          }}
-          onClick={() => setShowDetails(true)}
-        >
-          ↓ Scroll down for details
-        </div>
+        {/* Details toggle */}
+        <button className="btn-ghost" onClick={() => setShowDetails(!showDetails)} style={{ marginBottom: 16 }}>
+          {showDetails ? "Hide details ↑" : "Show details ↓"}
+        </button>
+
+        {showDetails && (
+          <Card className="animate-in" style={{ width: "100%", marginBottom: 24 }}>
+            <p style={{ color: "var(--text-secondary)", lineHeight: 1.7, fontSize: "0.85rem", marginBottom: 12 }}>
+              {exercise.description}
+            </p>
+            <hr className="divider" />
+            <div style={{ display: "flex", gap: 24, fontSize: "0.8rem" }}>
+              <div>
+                <span style={{ color: "var(--text-muted)" }}>Body: </span>
+                <span style={{ fontWeight: 500 }}>{exercise.bodyArea}</span>
+              </div>
+              <div>
+                <span style={{ color: "var(--text-muted)" }}>Type: </span>
+                <span style={{ fontWeight: 500 }}>{exercise.type}</span>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
 
         {/* Next button */}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-          <button
-            onClick={handleNext}
-            style={{
-              padding: "12px 24px",
-              borderRadius: 12,
-              border: "none",
-              fontWeight: 700,
-              fontSize: "1rem",
-              cursor: "pointer",
-              background: isComplete ? "var(--green)" : "var(--red)",
-              color: "#fff",
-            }}
-          >
-            Next →
-          </button>
-        </div>
+        <button
+          onClick={handleNext}
+          style={{
+            width: "100%",
+            padding: "16px",
+            borderRadius: "var(--radius-md)",
+            border: isComplete ? "none" : "1.5px solid var(--border)",
+            fontWeight: 600,
+            fontSize: "0.95rem",
+            cursor: "pointer",
+            background: isComplete ? "var(--green)" : "var(--bg-card)",
+            color: isComplete ? "#fff" : "var(--text-secondary)",
+            transition: "all var(--transition)",
+            boxShadow: isComplete ? "0 4px 16px rgba(46,204,113,0.3)" : "var(--shadow-sm)",
+          }}
+        >
+          {idx + 1 >= total ? "Finish Workout →" : "Next Exercise →"}
+        </button>
       </div>
-
-      {/* Detail frame (scroll-snap second page) */}
-      {showDetails && (
-        <div className="snap-page" style={{ padding: 24 }}>
-          <div
-            style={{
-              width: "100%",
-              height: 200,
-              background: "var(--bg-surface)",
-              borderRadius: 16,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: 20,
-              fontSize: "3rem",
-            }}
-          >
-            🏋️
-          </div>
-          <h2 style={{ fontWeight: 700, marginBottom: 8 }}>{exercise.name}</h2>
-          <p style={{ color: "var(--text-muted)", lineHeight: 1.6 }}>{exercise.description}</p>
-          <p style={{ marginTop: 12, fontSize: "0.9rem" }}>
-            <strong>Body area:</strong> {exercise.bodyArea}
-            <br />
-            <strong>Type:</strong> {exercise.type}
-          </p>
-          <div
-            style={{ marginTop: 20, textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem", cursor: "pointer" }}
-            onClick={() => setShowDetails(false)}
-          >
-            ↑ Back to exercise
-          </div>
-        </div>
-      )}
     </div>
   );
 }

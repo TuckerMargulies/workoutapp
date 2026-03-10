@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { BottomNav } from "./BottomNav";
 
 export const metadata: Metadata = {
   title: "Workout App",
@@ -23,6 +24,7 @@ export default function RootLayout({
           }}
         >
           {children}
+          <BottomNav />
         </div>
       </body>
     </html>

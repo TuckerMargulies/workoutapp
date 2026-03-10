@@ -6,6 +6,7 @@ import Link from "next/link";
 import { getLocations, getBreakdownPreferences, saveCurrentPlan } from "@/lib/store";
 import { generateWorkout } from "@/lib/generateWorkout";
 import type { LocationConfig, BreakdownPreference } from "@/lib/types";
+import { Card, PageHeader, Tag, FreqBadge } from "@/components";
 
 export default function PlanWorkout() {
   const router = useRouter();
@@ -45,19 +46,15 @@ export default function PlanWorkout() {
   }
 
   return (
-    <div style={{ padding: 24, minHeight: "100dvh" }}>
-      <Link href="/" className="back-btn">
-        ← Home
-      </Link>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 16 }}>
-        Plan a Workout
-      </h1>
+    <div className="page-container">
+      <Link href="/" className="back-btn">← Back</Link>
+      <PageHeader title="Plan Workout" subtitle="Configure your session" />
 
       {/* Time slider */}
-      <section className="card" style={{ marginTop: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-          <span style={{ fontWeight: 600 }}>Time</span>
-          <span style={{ color: "var(--accent)", fontWeight: 700 }}>{time} min</span>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Duration</span>
+          <FreqBadge value={time} unit=" min" />
         </div>
         <input
           type="range"
@@ -68,44 +65,37 @@ export default function PlanWorkout() {
           onChange={(e) => setTime(Number(e.target.value))}
           className="slider-track"
         />
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: "0.75rem",
-            color: "var(--text-muted)",
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 6 }}>
           <span>5 min</span>
           <span>90 min</span>
         </div>
-      </section>
+      </Card>
 
       {/* Location picker */}
-      <section className="card" style={{ marginTop: 16 }}>
+      <Card style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontWeight: 600 }}>Location</span>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Location</span>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <button
-              className="btn-secondary"
-              style={{ padding: "6px 12px", fontSize: "0.9rem" }}
+              className="btn-ghost"
+              style={{ padding: "6px 10px", fontSize: "0.85rem" }}
               onClick={() => setSelectedLoc((p) => (p > 0 ? p - 1 : locations.length - 1))}
             >
-              ◀
+              ‹
             </button>
-            <span style={{ minWidth: 80, textAlign: "center", fontWeight: 600 }}>
+            <span style={{ minWidth: 80, textAlign: "center", fontWeight: 600, fontSize: "0.9rem" }}>
               {currentLoc?.name ?? "—"}
             </span>
             <button
-              className="btn-secondary"
-              style={{ padding: "6px 12px", fontSize: "0.9rem" }}
+              className="btn-ghost"
+              style={{ padding: "6px 10px", fontSize: "0.85rem" }}
               onClick={() => setSelectedLoc((p) => (p < locations.length - 1 ? p + 1 : 0))}
             >
-              ▶
+              ›
             </button>
             <button
-              className="btn-secondary"
-              style={{ padding: "6px 10px", fontSize: "0.75rem" }}
+              className="btn-accent-outline"
+              style={{ padding: "6px 12px", fontSize: "0.75rem" }}
               onClick={() => {
                 if (!customizeOpen && currentLoc && !equipOverride) {
                   setEquipOverride({ ...currentLoc.equipment });
@@ -113,15 +103,16 @@ export default function PlanWorkout() {
                 setCustomizeOpen(!customizeOpen);
               }}
             >
-              Customize
+              {customizeOpen ? "Done" : "Customize"}
             </button>
           </div>
         </div>
 
         {customizeOpen && equipOverride && (
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <hr className="divider" style={{ margin: "0 0 4px" }} />
             {Object.entries(equipOverride).map(([eq, checked]) => (
-              <label key={eq} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label key={eq} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: "0.9rem" }}>
                 <input
                   type="checkbox"
                   checked={checked}
@@ -134,23 +125,28 @@ export default function PlanWorkout() {
             ))}
           </div>
         )}
-      </section>
+      </Card>
 
       {/* Goals */}
-      <section className="card" style={{ marginTop: 16 }}>
+      <Card style={{ marginBottom: 12 }}>
         <div
           style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
           onClick={() => setGoalsOpen(!goalsOpen)}
         >
-          <span style={{ fontWeight: 600 }}>Specific Goals</span>
-          <span style={{ color: "var(--text-muted)" }}>
-            {selectedGoals.length === 0 ? "Plan For Me" : selectedGoals.join(", ")}
-          </span>
+          <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Focus Areas</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Tag>{selectedGoals.length === 0 ? "Auto" : `${selectedGoals.length} selected`}</Tag>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+              {goalsOpen ? "▲" : "▼"}
+            </span>
+          </div>
         </div>
         {goalsOpen && (
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <hr className="divider" style={{ margin: "0 0 4px" }} />
+            <p className="section-title" style={{ marginBottom: 0 }}>Exercise Type</p>
             {["resistance", "mobility", "cardio"].map((t) => (
-              <label key={t} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label key={t} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: "0.9rem" }}>
                 <input
                   type="checkbox"
                   checked={selectedGoals.includes(t)}
@@ -159,29 +155,35 @@ export default function PlanWorkout() {
                 <span style={{ textTransform: "capitalize" }}>{t}</span>
               </label>
             ))}
-            <div style={{ marginTop: 4, fontWeight: 600, fontSize: "0.85rem", color: "var(--text-muted)" }}>
-              Specific Goals
-            </div>
-            {prefs
-              .filter((p) => p.isSpecificGoal)
-              .map((p) => (
-                <label key={p.type} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedGoals.includes(p.type)}
-                    onChange={() => toggleGoal(p.type)}
-                  />
-                  <span style={{ textTransform: "capitalize" }}>{p.type}</span>
-                </label>
-              ))}
+            {prefs.filter((p) => p.isSpecificGoal).length > 0 && (
+              <>
+                <p className="section-title" style={{ marginTop: 8, marginBottom: 0 }}>Specific Goals</p>
+                {prefs
+                  .filter((p) => p.isSpecificGoal)
+                  .map((p) => (
+                    <label key={p.type} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: "0.9rem" }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedGoals.includes(p.type)}
+                        onChange={() => toggleGoal(p.type)}
+                      />
+                      <span style={{ textTransform: "capitalize" }}>{p.type}</span>
+                    </label>
+                  ))}
+              </>
+            )}
           </div>
         )}
-      </section>
+      </Card>
 
       {/* Start button */}
-      <div style={{ display: "flex", justifyContent: "center", marginTop: 32 }}>
-        <button className="btn-primary" style={{ width: "100%", maxWidth: 320 }} onClick={handleStart}>
-          Start
+      <div style={{ marginTop: 28 }}>
+        <button
+          className="btn-primary"
+          style={{ width: "100%", padding: "16px" }}
+          onClick={handleStart}
+        >
+          Generate Workout →
         </button>
       </div>
     </div>

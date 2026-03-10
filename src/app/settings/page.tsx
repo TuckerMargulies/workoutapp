@@ -1,39 +1,67 @@
 "use client";
 
-import Link from "next/link";
+import { Card, PageHeader, IconBox, ComingSoon } from "@/components";
 
 export default function AppSettings() {
   return (
-    <div style={{ padding: 24, minHeight: "100dvh" }}>
-      <Link href="/" className="back-btn">← Home</Link>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 16 }}>App Settings</h1>
+    <div className="page-container">
+      <PageHeader
+        title="Settings"
+        subtitle="App preferences and configuration"
+        style={{ marginTop: 8 }}
+      />
 
-      <div className="card" style={{ marginTop: 24 }}>
-        <h2 style={{ fontWeight: 600, marginBottom: 8 }}>Display & Tracking</h2>
-        <p style={{ color: "var(--text-muted)", lineHeight: 1.6 }}>
-          Future options for how the Today&apos;s Workout screen and Exercise screen
-          appear and track your workout will be available here.
-        </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <IconBox icon="🖥" bg="var(--accent-soft)" />
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 2 }}>Display & Tracking</p>
+              <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", lineHeight: 1.4 }}>
+                Customize how workouts and exercises are displayed during sessions
+              </p>
+            </div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <ComingSoon />
+          </div>
+        </Card>
+
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <IconBox icon="☁️" bg="var(--green-soft)" />
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 2 }}>Uploads & Sync</p>
+              <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", lineHeight: 1.4 }}>
+                Configure cloud sync and data backup options
+              </p>
+            </div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <ComingSoon />
+          </div>
+        </Card>
+
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <IconBox icon="📱" bg="var(--orange-soft)" />
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 2 }}>Notifications</p>
+              <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", lineHeight: 1.4 }}>
+                Workout reminders and streak notifications
+              </p>
+            </div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <ComingSoon />
+          </div>
+        </Card>
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2 style={{ fontWeight: 600, marginBottom: 8 }}>Uploads & Sync</h2>
-        <p style={{ color: "var(--text-muted)", lineHeight: 1.6 }}>
-          Options for how data uploads and tracking work will be added in a future update.
+      <div style={{ marginTop: 24, textAlign: "center" }}>
+        <p style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+          Workout App v0.1.0 Alpha
         </p>
-      </div>
-
-      <div
-        style={{
-          marginTop: 32,
-          padding: 16,
-          borderRadius: 12,
-          border: "1px dashed var(--border)",
-          textAlign: "center",
-          color: "var(--text-muted)",
-        }}
-      >
-        Placeholder — more settings coming soon
       </div>
     </div>
   );

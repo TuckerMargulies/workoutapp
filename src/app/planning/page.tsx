@@ -1,45 +1,85 @@
 "use client";
 
 import Link from "next/link";
+import { Card, PageHeader } from "@/components";
 
 export default function PlanningHome() {
   const items = [
-    { label: "Library", href: "/planning/library", emoji: "📚" },
-    { label: "Breakdown", href: "/planning/breakdown", emoji: "📊" },
-    { label: "Specific Goals", href: "/planning/goals", emoji: "🎯" },
-    { label: "Locations", href: "/planning/locations", emoji: "📍" },
+    {
+      label: "Exercise Library",
+      href: "/planning/library",
+      icon: "📖",
+      desc: "Browse & manage your exercises and workout groups",
+      color: "var(--accent-soft)",
+    },
+    {
+      label: "Breakdown",
+      href: "/planning/breakdown",
+      icon: "📊",
+      desc: "Set frequency priorities for each exercise type",
+      color: "var(--green-soft)",
+    },
+    {
+      label: "Specific Goals",
+      href: "/planning/goals",
+      icon: "🎯",
+      desc: "Target specific areas like shoulders, back, or surfing",
+      color: "var(--orange-soft)",
+    },
+    {
+      label: "Locations",
+      href: "/planning/locations",
+      icon: "📍",
+      desc: "Manage workout locations and available equipment",
+      color: "var(--blue-soft)",
+    },
   ];
 
   return (
-    <div style={{ padding: 24, minHeight: "100dvh" }}>
-      <Link href="/" className="back-btn">← Home</Link>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: 16 }}>Planning</h1>
+    <div className="page-container">
+      <PageHeader
+        title="Planning"
+        subtitle="Customize how your workouts are generated"
+        style={{ marginTop: 8 }}
+      />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          marginTop: 24,
-        }}
-      >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {items.map((item) => (
           <Link key={item.href} href={item.href} style={{ textDecoration: "none" }}>
-            <div
-              className="card"
+            <Card
+              interactive
               style={{
                 display: "flex",
-                flexDirection: "column",
                 alignItems: "center",
-                justifyContent: "center",
-                height: 140,
-                cursor: "pointer",
-                transition: "background 0.15s",
+                gap: 16,
+                padding: "20px",
               }}
             >
-              <span style={{ fontSize: "2.5rem", marginBottom: 8 }}>{item.emoji}</span>
-              <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>{item.label}</span>
-            </div>
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: "var(--radius-md)",
+                  background: item.color,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "1.4rem",
+                  flexShrink: 0,
+                }}
+              >
+                {item.icon}
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: 3, color: "var(--text)" }}>
+                  {item.label}
+                </p>
+                <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", lineHeight: 1.4 }}>
+                  {item.desc}
+                </p>
+              </div>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>›</span>
+            </Card>
           </Link>
         ))}
       </div>
