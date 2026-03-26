@@ -77,24 +77,41 @@ function WorkoutLogCard({ log }: { log: WorkoutLog }) {
 
       {expanded && (
         <View style={styles.exerciseList}>
+          {/* Debrief summary if available */}
+          {log.debriefSummary && (
+            <View style={styles.debriefRow}>
+              {log.effortLevel && (
+                <Text style={[
+                  styles.effortTag,
+                  log.effortLevel === "high" && styles.effortHigh,
+                  log.effortLevel === "low" && styles.effortLow,
+                ]}>
+                  {log.effortLevel === "high" ? "Hard" : log.effortLevel === "low" ? "Light" : "Solid"}
+                </Text>
+              )}
+              <Text style={styles.debriefText}>{log.debriefSummary}</Text>
+            </View>
+          )}
+
+          {/* Exercise list */}
           {log.exercises.map((ex, i) => (
             <View key={i} style={styles.exerciseRow}>
-              <Text style={styles.exerciseDot}>
-                {ex.completed ? "✓" : "–"}
-              </Text>
-              <Text
-                style={[
-                  styles.exerciseName,
-                  !ex.completed && styles.exerciseSkipped,
-                ]}
-              >
+              <Text style={styles.exerciseDot}>{ex.completed ? "✓" : "–"}</Text>
+              <Text style={[styles.exerciseName, !ex.completed && styles.exerciseSkipped]}>
                 {ex.exerciseName}
               </Text>
               <Text style={styles.exerciseMeta}>
-                {ex.timeSec > 0 ? formatTime(ex.timeSec) : ""}
+                {ex.reps > 0 ? `${ex.reps} reps` : ex.timeSec > 0 ? formatTime(ex.timeSec) : ""}
               </Text>
             </View>
           ))}
+
+          {/* Pain flags */}
+          {log.painNotes && log.painNotes.length > 0 && (
+            <View style={styles.painRow}>
+              <Text style={styles.painLabel}>⚠ {log.painNotes.join(", ")}</Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -164,6 +181,22 @@ const styles = StyleSheet.create({
   exerciseName: { flex: 1, color: "#ccc", fontSize: 14 },
   exerciseSkipped: { color: "#444" },
   exerciseMeta: { color: "#555", fontSize: 12 },
+  debriefRow: { gap: 6, marginBottom: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#1e1e1e" },
+  debriefText: { color: "#888", fontSize: 13, lineHeight: 18 },
+  effortTag: {
+    alignSelf: "flex-start",
+    backgroundColor: "#e8ff4a22",
+    color: "#e8ff4a",
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 20,
+  },
+  effortHigh: { backgroundColor: "#ff4a4a22", color: "#ff4a4a" },
+  effortLow: { backgroundColor: "#4a9eff22", color: "#4a9eff" },
+  painRow: { marginTop: 8 },
+  painLabel: { color: "#ff4a4a88", fontSize: 12 },
   expandHint: {
     color: "#333",
     fontSize: 11,

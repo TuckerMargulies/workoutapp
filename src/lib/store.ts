@@ -12,6 +12,8 @@ import {
   BreakdownPreference,
   LocationConfig,
   WorkoutPlan,
+  UserMemory,
+  ShortTermInjury,
 } from "./types";
 import { defaultExercises, defaultWorkoutGroups } from "../data/exercises";
 import {
@@ -188,6 +190,45 @@ export async function saveCurrentExerciseIndex(idx: number): Promise<void> {
     .from("current_plan")
     .update({ exercise_index: idx })
     .eq("user_id", userId);
+}
+
+// ---- User Profile (AsyncStorage — Pinecone in full version) ----
+const PROFILE_KEY = "workout_user_profile";
+
+export async function getUserProfile(): Promise<UserMemory | null> {
+  return load<UserMemory | null>(PROFILE_KEY, null);
+}
+
+export async function saveUserProfile(profile: UserMemory): Promise<void> {
+  await save(PROFILE_KEY, profile);
+}
+
+export async function updateShortTermInjury(
+  userId: string,
+  injury: ShortTermInjury
+): Promise<void> {
+  const profile = await getUserProfile();
+  if (!profile) return;
+  const existing = profile.shortTermInjuries.findIndex(
+    (i) => i.area === injury.area
+  );
+  if (existing >= 0) {
+    profile.shortTermInjuries[existing] = injury;
+  } else {
+    profile.shortTermInjuries.push(injury);
+  }
+  await saveUserProfile(profile);
+}
+
+export async function resolveShortTermInjury(area: string): Promise<void> {
+  const profile = await getUserProfile();
+  if (!profile) return;
+  const injury = profile.shortTermInjuries.find((i) => i.area === area);
+  if (injury) {
+    injury.status = "healed";
+    injury.lastChecked = new Date().toISOString().split("T")[0];
+  }
+  await saveUserProfile(profile);
 }
 
 // ---- Utility: list all unique equipment across DB 1A & 1B ----

@@ -11,7 +11,6 @@ module.exports = {
         lime: "#e8ff4a",
         "app-bg": "#0a0a0a",
         "card-bg": "#111111",
-        "border": "#1e1e1e",
       },
     },
   },

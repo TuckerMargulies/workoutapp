@@ -60,6 +60,13 @@ export interface WorkoutLog {
   exercises: WorkoutExerciseLog[];
   voiceAdjustments?: VoiceAdjustment[]; // Phase 2+
   bioStatusFlags?: string[]; // Phase 3+: reported issues this session
+  // Phase 5+: post-workout debrief
+  debriefTranscript?: string;
+  debriefSummary?: string;
+  effortLevel?: "low" | "moderate" | "high";
+  painNotes?: string[];
+  completedExerciseNames?: string[];
+  skippedExerciseNames?: string[];
 }
 
 export interface WorkoutExerciseLog {
@@ -118,24 +125,48 @@ export interface PlannedExercise {
   type: ExerciseType;
 }
 
-// ---- Phase 1+: User Memory (stored in Pinecone) ----
+// ---- Phase 1+: Injury Classification ----
+export interface ChronicInjury {
+  area: string; // e.g. "left knee", "lower back"
+  description: string; // e.g. "ACL surgery 2022, avoid deep knee flexion"
+  dateAdded: string; // ISO date
+  isRehabGoal: boolean; // true = include rehab exercises targeting this area
+}
+
+export interface ShortTermInjury {
+  area: string; // e.g. "right shoulder"
+  description: string; // e.g. "tweaked during workout on 2026-03-26"
+  dateReported: string; // ISO date
+  lastChecked: string; // ISO date — updated each session check-in
+  status: "active" | "improving" | "healed";
+}
+
+// ---- Phase 1+: Location + Equipment Profile ----
+export interface LocationProfile {
+  name: string; // e.g. "home gym", "commercial gym", "park"
+  equipment: string[]; // equipment available at this specific location
+  // e.g. ["1x 20kg kettlebell", "resistance bands", "dumbbells"]
+  // e.g. ["full gym — barbells, cables, machines, dumbbells"]
+  // e.g. [] = bodyweight only
+}
+
+// ---- Phase 1+: User Profile (stored in AsyncStorage, Pinecone in full version) ----
 export interface UserMemory {
   userId: string;
-  injuryHistory: {
-    area: string;
-    severity: "mild" | "moderate" | "severe";
-    date: string;
-    resolved: boolean;
-  }[];
-  goals: string[];
+  // Profile
   fitnessLevel: "beginner" | "intermediate" | "advanced";
+  goals: string[]; // e.g. ["build strength", "lose weight", "rehab knee"]
   trainerName: string; // user's chosen name for their AI trainer
+  voiceInputPreference: "push-to-talk" | "wake-word"; // set during onboarding
+  trainingDaysPerWeek: number; // e.g. 4
+  // Locations + equipment per location
+  locationProfiles: LocationProfile[];
+  // Injuries
+  chronicInjuries: ChronicInjury[]; // permanent — always factored into workouts
+  shortTermInjuries: ShortTermInjury[]; // active until user confirms healed
+  // Session history
   recentSessionSummaries: string[]; // last 5 session summaries
-  symptomTrends: {
-    area: string;
-    mentions: number;
-    lastMentioned: string;
-  }[];
+  totalSessionsCompleted: number;
 }
 
 // ---- Phase 3+: Bio-status before a workout ----

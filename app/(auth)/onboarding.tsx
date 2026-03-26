@@ -1,151 +1,252 @@
-// Voice onboarding interview — Phase 1 will make this fully voice-driven
-// Phase 0: text-based form as placeholder with same data structure
-import { useState } from "react";
+// ============================================================
+// Voice Onboarding Interview — Phase 3
+// Claude asks questions, user answers via push-to-talk STT
+// Builds full UserMemory profile saved to AsyncStorage
+// ============================================================
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  ActivityIndicator,
   Alert,
 } from "react-native";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
+import { saveUserProfile } from "@/lib/store";
+import { extractProfileFromInterview } from "@/lib/ai/trainer";
+import MicButton from "@/components/MicButton";
 
-const FITNESS_LEVELS = ["beginner", "intermediate", "advanced"] as const;
+// ---- Base interview questions ----
+// Equipment questions are dynamically inserted per location after step 2
+const BASE_QUESTIONS = [
+  {
+    id: "trainerName",
+    text: "What should I call you? Give me a name — like Coach Alex or Sam.",
+    hint: "This is what your AI trainer will go by.",
+  },
+  {
+    id: "fitnessLevel",
+    text: "How would you describe your current fitness level — beginner, intermediate, or advanced?",
+    hint: "Be honest. I'll calibrate your workouts accordingly.",
+  },
+  {
+    id: "locations",
+    text: "Where do you usually work out? For example — home gym, commercial gym, park, or a mix.",
+    hint: "I'll ask about equipment at each location next.",
+  },
+  // Equipment questions inserted here dynamically per location
+  {
+    id: "injuries",
+    text: "Do you have any chronic injuries or long-term conditions I should always work around? Or say 'none' if you're all clear.",
+    hint: "These will always be factored into every workout.",
+  },
+  {
+    id: "goals",
+    text: "What are your main fitness goals? For example — build strength, lose weight, improve cardio, rehab an injury, surf better.",
+    hint: "The more specific, the better I can help.",
+  },
+  {
+    id: "trainingDays",
+    text: "How many days per week are you looking to train?",
+    hint: "I'll build a schedule around your availability.",
+  },
+  {
+    id: "voicePreference",
+    text: "Last one — do you prefer push-to-talk, where you tap and hold the mic? Or a wake word so you can go hands-free?",
+    hint: "You can always change this during a workout.",
+  },
+];
+
+// Parse location names from a voice answer
+function parseLocations(answer: string): string[] {
+  const lower = answer.toLowerCase();
+  const found: string[] = [];
+  const patterns: [RegExp, string][] = [
+    [/home\s*gym|at home|my house|basement|garage/i, "home gym"],
+    [/commercial\s*gym|public\s*gym|the gym|fitness\s*cent(er|re)|planet\s*fitness|equinox/i, "commercial gym"],
+    [/park|outside|outdoor|trail|beach/i, "park"],
+    [/office|work/i, "office"],
+    [/hotel|travel|on\s*the\s*road/i, "travel"],
+  ];
+  for (const [regex, name] of patterns) {
+    if (regex.test(lower)) found.push(name);
+  }
+  return found.length > 0 ? found : ["home"];
+}
+
+type QA = { question: string; answer: string };
 
 export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
-  const [trainerName, setTrainerName] = useState("");
-  const [fitnessLevel, setFitnessLevel] = useState<
-    "beginner" | "intermediate" | "advanced"
-  >("intermediate");
-  const [injuryNotes, setInjuryNotes] = useState("");
-  const [goals, setGoals] = useState("");
+  const [answers, setAnswers] = useState<QA[]>([]);
+  const [currentTranscript, setCurrentTranscript] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [questions, setQuestions] = useState(BASE_QUESTIONS);
+  const scrollRef = useRef<ScrollView>(null);
 
   const setTrainerNameStore = useAppStore((s) => s.setTrainerName);
+  const setUserMemoryStore = useAppStore((s) => s.setUserMemory);
+  const userId = useAppStore((s) => s.userId) ?? "local-user";
 
-  const steps = [
-    {
-      title: "What should I call you?",
-      hint: "Your trainer's name (e.g., 'Coach Alex', 'Sam')",
-      content: (
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Coach Alex"
-          placeholderTextColor="#555"
-          value={trainerName}
-          onChangeText={setTrainerName}
-        />
-      ),
-    },
-    {
-      title: "What's your fitness level?",
-      hint: "Be honest — I'll calibrate your workouts accordingly.",
-      content: (
-        <View style={styles.optionRow}>
-          {FITNESS_LEVELS.map((level) => (
-            <TouchableOpacity
-              key={level}
-              style={[
-                styles.optionBtn,
-                fitnessLevel === level && styles.optionBtnActive,
-              ]}
-              onPress={() => setFitnessLevel(level)}
-            >
-              <Text
-                style={[
-                  styles.optionText,
-                  fitnessLevel === level && styles.optionTextActive,
-                ]}
-              >
-                {level.charAt(0).toUpperCase() + level.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      ),
-    },
-    {
-      title: "Any injuries or areas to avoid?",
-      hint: "e.g. 'left knee pain from running', 'lower back issues'",
-      content: (
-        <TextInput
-          style={[styles.input, styles.inputMultiline]}
-          placeholder="Tell me about any injuries or pain points..."
-          placeholderTextColor="#555"
-          value={injuryNotes}
-          onChangeText={setInjuryNotes}
-          multiline
-          numberOfLines={4}
-        />
-      ),
-    },
-    {
-      title: "What are your fitness goals?",
-      hint: "e.g. 'surf better', 'reduce back pain', 'build strength'",
-      content: (
-        <TextInput
-          style={[styles.input, styles.inputMultiline]}
-          placeholder="What do you want to achieve?"
-          placeholderTextColor="#555"
-          value={goals}
-          onChangeText={setGoals}
-          multiline
-          numberOfLines={4}
-        />
-      ),
-    },
-  ];
+  const currentQuestion = questions[step];
+  const isLastQuestion = step === questions.length - 1;
+  const progress = (step / questions.length) * 100;
 
-  function handleNext() {
-    if (step === 0 && !trainerName.trim()) {
-      Alert.alert("Name required", "Give your trainer a name to continue.");
+  // After the locations question (step 2), inject per-location equipment questions
+  function maybeInjectEquipmentQuestions(locationAnswer: string) {
+    const locations = parseLocations(locationAnswer);
+    if (locations.length === 0) return;
+
+    const equipmentQuestions = locations.map((loc) => ({
+      id: `equipment_${loc}`,
+      text: `What equipment do you have at your ${loc}? List everything — or say 'bodyweight only' if you have no equipment there.`,
+      hint: `Be specific with quantities if you can, e.g. "one 20kg kettlebell, resistance bands, dumbbells".`,
+    }));
+
+    // Insert after the locations question (index 2)
+    const updated = [
+      ...BASE_QUESTIONS.slice(0, 3),
+      ...equipmentQuestions,
+      ...BASE_QUESTIONS.slice(3),
+    ];
+    setQuestions(updated);
+  }
+
+  useEffect(() => {
+    setCurrentTranscript("");
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [step]);
+
+  function handleTranscript(text: string) {
+    setCurrentTranscript(text);
+  }
+
+  function handleRetry() {
+    setCurrentTranscript("");
+  }
+
+  async function handleConfirm() {
+    if (!currentTranscript.trim()) return;
+
+    const qa: QA = {
+      question: currentQuestion.text,
+      answer: currentTranscript.trim(),
+    };
+    const updatedAnswers = [...answers, qa];
+    setAnswers(updatedAnswers);
+
+    // After locations answer, inject per-location equipment questions
+    if (currentQuestion.id === "locations") {
+      maybeInjectEquipmentQuestions(currentTranscript.trim());
+    }
+
+    if (!isLastQuestion) {
+      setStep(step + 1);
       return;
     }
 
-    if (step < steps.length - 1) {
-      setStep(step + 1);
-    } else {
-      // Save trainer name and navigate to app
-      setTrainerNameStore(trainerName || "Coach");
-      // TODO Phase 1: store full memory in Pinecone
+    // All questions answered — extract profile
+    setIsSaving(true);
+    try {
+      const profile = await extractProfileFromInterview(updatedAnswers, userId);
+      await saveUserProfile(profile);
+      setTrainerNameStore(profile.trainerName);
+      setUserMemoryStore(profile);
       router.replace("/(tabs)");
+    } catch (e) {
+      Alert.alert(
+        "Setup error",
+        "Something went wrong saving your profile. Please try again.",
+        [{ text: "OK", onPress: () => setIsSaving(false) }]
+      );
     }
   }
 
-  const currentStep = steps[step];
+  if (isSaving) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#e8ff4a" />
+        <Text style={styles.loadingText}>Building your training profile...</Text>
+        <Text style={styles.loadingSubtext}>
+          Your trainer is getting to know you.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.container}
       contentContainerStyle={styles.inner}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Progress dots */}
-      <View style={styles.progressRow}>
-        {steps.map((_, i) => (
-          <View
-            key={i}
-            style={[styles.dot, i === step && styles.dotActive, i < step && styles.dotDone]}
+      {/* Progress bar */}
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${progress}%` }]} />
+      </View>
+      <Text style={styles.stepLabel}>
+        {step + 1} of {questions.length}
+      </Text>
+
+      {/* Question */}
+      <Text style={styles.question}>{currentQuestion.text}</Text>
+      <Text style={styles.hint}>{currentQuestion.hint}</Text>
+
+      {/* Previous answers (context) */}
+      {answers.length > 0 && (
+        <View style={styles.previousContainer}>
+          {answers.slice(-2).map((qa, i) => (
+            <View key={i} style={styles.previousItem}>
+              <Text style={styles.previousQ} numberOfLines={1}>
+                {qa.question.split("—")[0].trim()}
+              </Text>
+              <Text style={styles.previousA}>{qa.answer}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Voice input area */}
+      <View style={styles.voiceArea}>
+        {currentTranscript ? (
+          <View style={styles.transcriptContainer}>
+            <Text style={styles.transcriptLabel}>You said:</Text>
+            <Text style={styles.transcriptText}>{currentTranscript}</Text>
+            <TouchableOpacity onPress={handleRetry} style={styles.retryBtn}>
+              <Text style={styles.retryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <MicButton
+            onTranscript={handleTranscript}
+            onError={(err) => Alert.alert("Microphone error", err)}
+            size="lg"
           />
-        ))}
+        )}
       </View>
 
-      <Text style={styles.title}>{currentStep.title}</Text>
-      <Text style={styles.hint}>{currentStep.hint}</Text>
+      {/* Confirm button — only shown after transcript */}
+      {currentTranscript ? (
+        <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm}>
+          <Text style={styles.confirmText}>
+            {isLastQuestion ? "Complete Setup" : "Next →"}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
-      <View style={styles.inputContainer}>{currentStep.content}</View>
-
-      <TouchableOpacity style={styles.button} onPress={handleNext}>
-        <Text style={styles.buttonText}>
-          {step === steps.length - 1 ? "Start Training" : "Next"}
-        </Text>
-      </TouchableOpacity>
-
-      {step > 0 && (
-        <TouchableOpacity onPress={() => setStep(step - 1)} style={styles.back}>
+      {/* Back button */}
+      {step > 0 && !currentTranscript && (
+        <TouchableOpacity
+          onPress={() => {
+            setAnswers(answers.slice(0, -1));
+            setStep(step - 1);
+          }}
+          style={styles.backBtn}
+        >
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
       )}
@@ -158,77 +259,129 @@ const styles = StyleSheet.create({
   inner: {
     flexGrow: 1,
     paddingHorizontal: 28,
-    paddingTop: 80,
-    paddingBottom: 40,
+    paddingTop: 64,
+    paddingBottom: 48,
   },
-  progressRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 48,
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: "#0a0a0a",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingHorizontal: 40,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#333",
+  loadingText: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
   },
-  dotActive: { backgroundColor: "#e8ff4a", width: 24 },
-  dotDone: { backgroundColor: "#555" },
-  title: {
-    fontSize: 28,
+  loadingSubtext: {
+    color: "#888",
+    fontSize: 15,
+    textAlign: "center",
+  },
+  progressTrack: {
+    height: 3,
+    backgroundColor: "#1a1a1a",
+    borderRadius: 2,
+    marginBottom: 12,
+  },
+  progressFill: {
+    height: 3,
+    backgroundColor: "#e8ff4a",
+    borderRadius: 2,
+  },
+  stepLabel: {
+    color: "#555",
+    fontSize: 13,
+    marginBottom: 40,
+  },
+  question: {
+    fontSize: 26,
     fontWeight: "700",
     color: "#ffffff",
-    marginBottom: 12,
-    lineHeight: 36,
+    lineHeight: 34,
+    marginBottom: 10,
   },
   hint: {
-    fontSize: 15,
-    color: "#888",
+    fontSize: 14,
+    color: "#666",
     marginBottom: 32,
-    lineHeight: 22,
+    lineHeight: 20,
   },
-  inputContainer: { marginBottom: 32 },
-  input: {
-    backgroundColor: "#1a1a1a",
-    borderColor: "#333",
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: "#ffffff",
-    fontSize: 16,
+  previousContainer: {
+    gap: 10,
+    marginBottom: 32,
   },
-  inputMultiline: {
-    height: 120,
-    textAlignVertical: "top",
-    paddingTop: 14,
+  previousItem: {
+    backgroundColor: "#111",
+    borderRadius: 10,
+    padding: 12,
+    borderLeftWidth: 2,
+    borderLeftColor: "#333",
   },
-  optionRow: {
-    flexDirection: "row",
-    gap: 12,
+  previousQ: {
+    color: "#555",
+    fontSize: 11,
+    marginBottom: 2,
   },
-  optionBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#333",
+  previousA: {
+    color: "#888",
+    fontSize: 13,
+  },
+  voiceArea: {
     alignItems: "center",
+    paddingVertical: 32,
+  },
+  transcriptContainer: {
+    width: "100%",
     backgroundColor: "#1a1a1a",
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#e8ff4a33",
   },
-  optionBtnActive: {
-    backgroundColor: "#e8ff4a",
-    borderColor: "#e8ff4a",
+  transcriptLabel: {
+    color: "#e8ff4a",
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  optionText: { color: "#888", fontSize: 14, fontWeight: "600" },
-  optionTextActive: { color: "#0a0a0a" },
-  button: {
+  transcriptText: {
+    color: "#ffffff",
+    fontSize: 18,
+    lineHeight: 26,
+    marginBottom: 16,
+  },
+  retryBtn: {
+    alignSelf: "flex-start",
+  },
+  retryText: {
+    color: "#555",
+    fontSize: 14,
+    textDecorationLine: "underline",
+  },
+  confirmBtn: {
     backgroundColor: "#e8ff4a",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
+    marginTop: 8,
   },
-  buttonText: { color: "#0a0a0a", fontSize: 16, fontWeight: "700" },
-  back: { marginTop: 20, alignItems: "center" },
-  backText: { color: "#555", fontSize: 14 },
+  confirmText: {
+    color: "#0a0a0a",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  backBtn: {
+    marginTop: 20,
+    alignItems: "center",
+  },
+  backText: {
+    color: "#444",
+    fontSize: 14,
+  },
 });
