@@ -5,10 +5,13 @@ import { StatusBar } from "expo-status-bar";
 import { createClient } from "@/lib/supabase";
 import { useAppStore } from "@/lib/appStore";
 import { pullFromSupabase } from "@/lib/store";
+import { ActivityIndicator, View } from "react-native";
 
 export default function RootLayout() {
   const setAuth = useAppStore((s) => s.setAuth);
   const clearAuth = useAppStore((s) => s.clearAuth);
+  const setSessionLoading = useAppStore((s) => s.setSessionLoading);
+  const sessionLoading = useAppStore((s) => s.sessionLoading);
 
   useEffect(() => {
     const supabase = createClient();
@@ -18,6 +21,8 @@ export default function RootLayout() {
       if (session?.user) {
         setAuth(session.user.id, session.user.email ?? "");
         pullFromSupabase();
+      } else {
+        setSessionLoading(false);
       }
     });
 
@@ -35,6 +40,14 @@ export default function RootLayout() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  if (sessionLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "#0a0a0a", justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator color="#e8ff4a" size="large" />
+      </View>
+    );
+  }
 
   return (
     <>

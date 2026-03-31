@@ -10,7 +10,11 @@ import {
   StyleSheet,
   ActivityIndicator,
   Vibration,
+  Dimensions,
+  Platform,
 } from "react-native";
+
+const SCREEN_WIDTH = Dimensions.get("window").width;
 import { startRecording, stopAndTranscribe } from "../lib/voice/stt";
 
 interface MicButtonProps {
@@ -31,35 +35,41 @@ export default function MicButton({
   const [micState, setMicState] = useState<MicState>("idle");
 
   const isFull = size === "full";
-  const buttonSize = isFull ? 220 : size === "lg" ? 88 : size === "sm" ? 56 : 72;
+  const buttonSize = isFull ? SCREEN_WIDTH * 0.72 : size === "lg" ? 88 : size === "sm" ? 56 : 72;
 
-  const handlePressIn = useCallback(async () => {
-    if (disabled || micState !== "idle") return;
-    try {
-      Vibration.vibrate(40);
-      setMicState("recording");
-      await startRecording();
-    } catch (e: any) {
-      setMicState("idle");
-      onError?.(e?.message ?? "Could not start recording.");
+  const handlePress = useCallback(async () => {
+    if (Platform.OS === "web") {
+      onError?.("Mic not available in browser — use the text input below.");
+      return;
     }
-  }, [disabled, micState, onError]);
+    if (disabled || micState === "processing") return;
 
-  const handlePressOut = useCallback(async () => {
-    if (micState !== "recording") return;
-    try {
-      setMicState("processing");
-      const transcript = await stopAndTranscribe();
-      if (transcript && transcript.length > 0) {
-        Vibration.vibrate(20);
-        onTranscript(transcript);
+    if (micState === "idle") {
+      // Tap to START recording
+      try {
+        Vibration.vibrate(40);
+        setMicState("recording");
+        await startRecording();
+      } catch (e: any) {
+        setMicState("idle");
+        onError?.(e?.message ?? "Could not start recording.");
       }
-    } catch (e: any) {
-      onError?.(e?.message ?? "Could not transcribe audio. Please try again.");
-    } finally {
-      setMicState("idle");
+    } else if (micState === "recording") {
+      // Tap to STOP and transcribe
+      try {
+        setMicState("processing");
+        const transcript = await stopAndTranscribe();
+        if (transcript && transcript.length > 0) {
+          Vibration.vibrate(20);
+          onTranscript(transcript);
+        }
+      } catch (e: any) {
+        onError?.(e?.message ?? "Could not transcribe audio. Please try again.");
+      } finally {
+        setMicState("idle");
+      }
     }
-  }, [micState, onTranscript, onError]);
+  }, [disabled, micState, onError, onTranscript]);
 
   const isRecording = micState === "recording";
   const isProcessing = micState === "processing";
@@ -67,8 +77,7 @@ export default function MicButton({
   return (
     <View style={[styles.container, isFull && styles.containerFull]}>
       <Pressable
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+        onPress={handlePress}
         disabled={disabled || isProcessing}
         style={[
           styles.button,
@@ -92,13 +101,15 @@ export default function MicButton({
         )}
       </Pressable>
       <Text style={[styles.label, isFull && styles.labelFull]}>
-        {isRecording
-          ? "Listening..."
+        {Platform.OS === "web"
+          ? "Use text input below"
+          : isRecording
+          ? "Tap to stop"
           : isProcessing
           ? "Processing..."
           : disabled
           ? "Trainer is thinking..."
-          : "Hold to speak"}
+          : "Tap to speak"}
       </Text>
     </View>
   );

@@ -7,11 +7,14 @@ import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
@@ -85,6 +88,8 @@ export default function OnboardingScreen() {
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [questions, setQuestions] = useState(BASE_QUESTIONS);
+  const [useTextInput, setUseTextInput] = useState(false);
+  const [textDraft, setTextDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
 
   const setTrainerNameStore = useAppStore((s) => s.setTrainerName);
@@ -117,6 +122,7 @@ export default function OnboardingScreen() {
 
   useEffect(() => {
     setCurrentTranscript("");
+    setTextDraft("");
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }, [step]);
 
@@ -178,6 +184,10 @@ export default function OnboardingScreen() {
   }
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
     <ScrollView
       ref={scrollRef}
       style={styles.container}
@@ -210,14 +220,36 @@ export default function OnboardingScreen() {
         </View>
       )}
 
-      {/* Voice input area */}
+      {/* Voice / text input area */}
       <View style={styles.voiceArea}>
         {currentTranscript ? (
           <View style={styles.transcriptContainer}>
-            <Text style={styles.transcriptLabel}>You said:</Text>
+            <Text style={styles.transcriptLabel}>Your answer:</Text>
             <Text style={styles.transcriptText}>{currentTranscript}</Text>
             <TouchableOpacity onPress={handleRetry} style={styles.retryBtn}>
               <Text style={styles.retryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : useTextInput ? (
+          <View style={styles.textInputArea}>
+            <TextInput
+              style={styles.textAnswerInput}
+              placeholder="Type your answer..."
+              placeholderTextColor="#555"
+              value={textDraft}
+              onChangeText={setTextDraft}
+              multiline
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[styles.submitTextBtn, !textDraft.trim() && styles.submitTextBtnDisabled]}
+              disabled={!textDraft.trim()}
+              onPress={() => {
+                handleTranscript(textDraft.trim());
+                setTextDraft("");
+              }}
+            >
+              <Text style={styles.submitTextBtnText}>Submit</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -226,6 +258,18 @@ export default function OnboardingScreen() {
             onError={(err) => Alert.alert("Microphone error", err)}
             size="lg"
           />
+        )}
+
+        {/* Toggle between mic and text */}
+        {!currentTranscript && (
+          <TouchableOpacity
+            style={styles.toggleInputBtn}
+            onPress={() => { setUseTextInput(!useTextInput); setTextDraft(""); }}
+          >
+            <Text style={styles.toggleInputText}>
+              {useTextInput ? "🎤 Use mic instead" : "⌨️ Type instead"}
+            </Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -251,6 +295,7 @@ export default function OnboardingScreen() {
         </TouchableOpacity>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -362,6 +407,44 @@ const styles = StyleSheet.create({
   retryText: {
     color: "#555",
     fontSize: 14,
+    textDecorationLine: "underline",
+  },
+  textInputArea: {
+    width: "100%",
+    gap: 12,
+  },
+  textAnswerInput: {
+    backgroundColor: "#1a1a1a",
+    borderColor: "#333",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: "#ffffff",
+    fontSize: 16,
+    minHeight: 100,
+    textAlignVertical: "top",
+  },
+  submitTextBtn: {
+    backgroundColor: "#e8ff4a",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  submitTextBtnDisabled: {
+    opacity: 0.4,
+  },
+  submitTextBtnText: {
+    color: "#0a0a0a",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  toggleInputBtn: {
+    marginTop: 16,
+  },
+  toggleInputText: {
+    color: "#555",
+    fontSize: 13,
     textDecorationLine: "underline",
   },
   confirmBtn: {

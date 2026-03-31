@@ -10,6 +10,7 @@ interface AppState {
   userId: string | null;
   userEmail: string | null;
   isAuthenticated: boolean;
+  sessionLoading: boolean;
 
   // Active workout
   currentPlan: WorkoutPlan | null;
@@ -29,6 +30,7 @@ interface AppState {
   // Actions
   setAuth: (userId: string, email: string) => void;
   clearAuth: () => void;
+  setSessionLoading: (loading: boolean) => void;
   setCurrentPlan: (plan: WorkoutPlan) => void;
   clearCurrentPlan: () => void;
   setExerciseIndex: (idx: number) => void;
@@ -47,6 +49,7 @@ export const useAppStore = create<AppState>((set) => ({
   userId: null,
   userEmail: null,
   isAuthenticated: false,
+  sessionLoading: true,
 
   currentPlan: null,
   currentExerciseIndex: 0,
@@ -62,13 +65,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Actions
   setAuth: (userId, email) =>
-    set({ userId, userEmail: email, isAuthenticated: true }),
+    set({ userId, userEmail: email, isAuthenticated: true, sessionLoading: false }),
+
+  setSessionLoading: (loading) => set({ sessionLoading: loading }),
 
   clearAuth: () =>
     set({
       userId: null,
       userEmail: null,
       isAuthenticated: false,
+      sessionLoading: false,
       currentPlan: null,
       currentExerciseIndex: 0,
       isWorkoutActive: false,

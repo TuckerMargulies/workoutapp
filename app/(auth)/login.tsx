@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,8 +11,12 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { createClient } from "@/lib/supabase";
+
+const SAVED_EMAIL_KEY = "saved_email";
+const SAVED_PASSWORD_KEY = "saved_password";
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -20,6 +24,21 @@ export default function LoginScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+
+  // Load saved credentials on mount
+  useEffect(() => {
+    async function loadSaved() {
+      const savedEmail = await AsyncStorage.getItem(SAVED_EMAIL_KEY);
+      const savedPassword = await AsyncStorage.getItem(SAVED_PASSWORD_KEY);
+      if (savedEmail && savedPassword) {
+        setEmail(savedEmail);
+        setPassword(savedPassword);
+        setRememberMe(true);
+      }
+    }
+    loadSaved();
+  }, []);
 
   async function handleAuth() {
     if (!email.trim() || !password.trim()) {
@@ -41,6 +60,14 @@ export default function LoginScreen() {
           password,
         });
         if (error) throw error;
+        // Save or clear credentials based on Remember Me
+        if (rememberMe) {
+          await AsyncStorage.setItem(SAVED_EMAIL_KEY, email);
+          await AsyncStorage.setItem(SAVED_PASSWORD_KEY, password);
+        } else {
+          await AsyncStorage.removeItem(SAVED_EMAIL_KEY);
+          await AsyncStorage.removeItem(SAVED_PASSWORD_KEY);
+        }
         router.replace("/(tabs)");
       }
     } catch (err: any) {
@@ -101,6 +128,20 @@ export default function LoginScreen() {
             />
           </TouchableOpacity>
         </View>
+
+        {/* Remember Me — sign in only */}
+        {!isSignUpMode && (
+          <TouchableOpacity
+            style={styles.rememberRow}
+            onPress={() => setRememberMe(!rememberMe)}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+              {rememberMe && <Ionicons name="checkmark" size={14} color="#0a0a0a" />}
+            </View>
+            <Text style={styles.rememberLabel}>Remember me</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Main button */}
         <TouchableOpacity
@@ -195,6 +236,30 @@ const styles = StyleSheet.create({
   eyeButton: {
     paddingHorizontal: 14,
     paddingVertical: 14,
+  },
+  rememberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#555",
+    backgroundColor: "#1a1a1a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxChecked: {
+    backgroundColor: "#e8ff4a",
+    borderColor: "#e8ff4a",
+  },
+  rememberLabel: {
+    color: "#888",
+    fontSize: 14,
   },
   button: {
     borderRadius: 12,
