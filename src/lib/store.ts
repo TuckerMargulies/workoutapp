@@ -96,6 +96,7 @@ export async function updateWorkoutLogById(
   if (idx < 0) return;
   logs[idx] = { ...logs[idx], ...patch };
   await save(LOG_KEY, logs);
+  syncWorkoutLogToSupabase(logs[idx]); // fire-and-forget
 }
 
 async function syncWorkoutLogToSupabase(log: WorkoutLog): Promise<void> {
@@ -113,6 +114,12 @@ async function syncWorkoutLogToSupabase(log: WorkoutLog): Promise<void> {
     exercises: log.exercises,
     voice_adjustments: log.voiceAdjustments ?? [],
     bio_status_flags: log.bioStatusFlags ?? [],
+    debrief_transcript: log.debriefTranscript ?? null,
+    debrief_summary: log.debriefSummary ?? null,
+    effort_level: log.effortLevel ?? null,
+    pain_notes: log.painNotes ?? [],
+    completed_exercise_names: log.completedExerciseNames ?? [],
+    skipped_exercise_names: log.skippedExerciseNames ?? [],
   });
 }
 
@@ -212,6 +219,30 @@ export async function getUserProfile(): Promise<UserMemory | null> {
 
 export async function saveUserProfile(profile: UserMemory): Promise<void> {
   await save(PROFILE_KEY, profile);
+  syncUserProfileToSupabase(profile); // fire-and-forget
+}
+
+async function syncUserProfileToSupabase(profile: UserMemory): Promise<void> {
+  const userId = await getUserId();
+  if (!userId) return;
+  const supabase = createClient();
+  await supabase.from("user_profiles").upsert(
+    {
+      user_id: userId,
+      fitness_level: profile.fitnessLevel,
+      goals: profile.goals,
+      trainer_name: profile.trainerName,
+      voice_input_preference: profile.voiceInputPreference,
+      training_days_per_week: profile.trainingDaysPerWeek,
+      location_profiles: profile.locationProfiles,
+      chronic_injuries: profile.chronicInjuries,
+      short_term_injuries: profile.shortTermInjuries,
+      recent_session_summaries: profile.recentSessionSummaries,
+      total_sessions_completed: profile.totalSessionsCompleted,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
 }
 
 export async function updateShortTermInjury(
@@ -294,6 +325,12 @@ export async function pullFromSupabase(): Promise<void> {
       exercises: l.exercises as WorkoutLog["exercises"],
       voiceAdjustments: l.voice_adjustments ?? [],
       bioStatusFlags: l.bio_status_flags ?? [],
+      debriefTranscript: l.debrief_transcript ?? undefined,
+      debriefSummary: l.debrief_summary ?? undefined,
+      effortLevel: l.effort_level ?? undefined,
+      painNotes: l.pain_notes ?? undefined,
+      completedExerciseNames: l.completed_exercise_names ?? undefined,
+      skippedExerciseNames: l.skipped_exercise_names ?? undefined,
     }));
     await save(LOG_KEY, mapped);
   }
@@ -307,5 +344,29 @@ export async function pullFromSupabase(): Promise<void> {
   if (plan) {
     await save(PLAN_KEY, plan.plan);
     await save(IDX_KEY, plan.exercise_index);
+  }
+
+  // Pull user profile
+  const { data: profile } = await supabase
+    .from("user_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .single();
+
+  if (profile) {
+    const mapped: UserMemory = {
+      userId: profile.user_id,
+      fitnessLevel: profile.fitness_level,
+      goals: profile.goals ?? [],
+      trainerName: profile.trainer_name,
+      voiceInputPreference: profile.voice_input_preference,
+      trainingDaysPerWeek: profile.training_days_per_week,
+      locationProfiles: profile.location_profiles ?? [],
+      chronicInjuries: profile.chronic_injuries ?? [],
+      shortTermInjuries: profile.short_term_injuries ?? [],
+      recentSessionSummaries: profile.recent_session_summaries ?? [],
+      totalSessionsCompleted: profile.total_sessions_completed ?? 0,
+    };
+    await save(PROFILE_KEY, mapped);
   }
 }

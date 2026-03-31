@@ -40,3 +40,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+.next/
+.vercel/
+supabase/.temp/
+coverage/
