@@ -7,7 +7,7 @@ import * as FileSystem from "expo-file-system";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
 });
 
 // Fitness-specific terms to help Whisper accuracy

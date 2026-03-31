@@ -20,8 +20,8 @@ async function unloadActiveSound(): Promise<void> {
 
 // ---- ElevenLabs TTS ----
 async function speakWithElevenLabs(text: string): Promise<void> {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM"; // Rachel (default)
+  const apiKey = process.env.EXPO_PUBLIC_ELEVENLABS_API_KEY;
+  const voiceId = process.env.EXPO_PUBLIC_ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM"; // Rachel (default)
 
   if (!apiKey) throw new Error("No ElevenLabs API key");
 

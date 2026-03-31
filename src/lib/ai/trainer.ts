@@ -6,7 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { UserMemory, WorkoutPlan } from "../types";
 
 const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY,
 });
 
 // ---- Build system prompt from user profile ----
