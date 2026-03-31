@@ -7,11 +7,12 @@ import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
+  Platform,
 } from "react-native";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
@@ -83,7 +84,9 @@ export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<QA[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState("");
+  const [isVoiceInput, setIsVoiceInput] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [questions, setQuestions] = useState(BASE_QUESTIONS);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -117,15 +120,18 @@ export default function OnboardingScreen() {
 
   useEffect(() => {
     setCurrentTranscript("");
+    setIsVoiceInput(false);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }, [step]);
 
   function handleTranscript(text: string) {
     setCurrentTranscript(text);
+    setIsVoiceInput(true);
   }
 
   function handleRetry() {
     setCurrentTranscript("");
+    setIsVoiceInput(false);
   }
 
   async function handleConfirm() {
@@ -150,29 +156,72 @@ export default function OnboardingScreen() {
 
     // All questions answered — extract profile
     setIsSaving(true);
+    setSaveError(null);
     try {
       const profile = await extractProfileFromInterview(updatedAnswers, userId);
       await saveUserProfile(profile);
       setTrainerNameStore(profile.trainerName);
       setUserMemoryStore(profile);
       router.replace("/(tabs)");
-    } catch (e) {
-      Alert.alert(
-        "Setup error",
-        "Something went wrong saving your profile. Please try again.",
-        [{ text: "OK", onPress: () => setIsSaving(false) }]
-      );
+    } catch (e: any) {
+      const msg = e?.message ?? "Unknown error";
+      console.error("Profile extraction failed:", msg);
+      setSaveError(msg);
     }
+  }
+
+  // Skip AI extraction and use defaults
+  async function handleSkipAI() {
+    const fallback: any = {
+      userId,
+      fitnessLevel: "intermediate",
+      goals: [],
+      trainerName: answers.find((a) => a.question.includes("call you"))?.answer ?? "Coach",
+      voiceInputPreference: "push-to-talk",
+      trainingDaysPerWeek: 4,
+      locationProfiles: [],
+      chronicInjuries: [],
+      shortTermInjuries: [],
+      recentSessionSummaries: [],
+      totalSessionsCompleted: 0,
+    };
+    await saveUserProfile(fallback);
+    setTrainerNameStore(fallback.trainerName);
+    setUserMemoryStore(fallback);
+    router.replace("/(tabs)");
   }
 
   if (isSaving) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#e8ff4a" />
-        <Text style={styles.loadingText}>Building your training profile...</Text>
-        <Text style={styles.loadingSubtext}>
-          Your trainer is getting to know you.
-        </Text>
+        {saveError ? (
+          <>
+            <Text style={styles.errorText}>Failed to build profile</Text>
+            <Text style={styles.loadingSubtext}>{saveError}</Text>
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 20 }}>
+              <TouchableOpacity
+                style={[styles.confirmBtn, { backgroundColor: "#333" }]}
+                onPress={() => { setSaveError(null); handleConfirm(); }}
+              >
+                <Text style={styles.confirmText}>Retry</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmBtn}
+                onPress={handleSkipAI}
+              >
+                <Text style={styles.confirmText}>Skip & Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <>
+            <ActivityIndicator size="large" color="#e8ff4a" />
+            <Text style={styles.loadingText}>Building your training profile...</Text>
+            <Text style={styles.loadingSubtext}>
+              Your trainer is getting to know you.
+            </Text>
+          </>
+        )}
       </View>
     );
   }
@@ -212,7 +261,7 @@ export default function OnboardingScreen() {
 
       {/* Voice input area */}
       <View style={styles.voiceArea}>
-        {currentTranscript ? (
+        {isVoiceInput && currentTranscript ? (
           <View style={styles.transcriptContainer}>
             <Text style={styles.transcriptLabel}>You said:</Text>
             <Text style={styles.transcriptText}>{currentTranscript}</Text>
@@ -221,11 +270,28 @@ export default function OnboardingScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <MicButton
-            onTranscript={handleTranscript}
-            onError={(err) => Alert.alert("Microphone error", err)}
-            size="lg"
-          />
+          <View style={styles.inputArea}>
+            {Platform.OS !== "web" && (
+              <MicButton
+                onTranscript={handleTranscript}
+                onError={(err) => Alert.alert("Microphone error", err)}
+                size="lg"
+              />
+            )}
+            <TextInput
+              style={styles.textInput}
+              placeholder="Type your answer..."
+              placeholderTextColor="#666"
+              value={currentTranscript}
+              onChangeText={(text) => {
+                setCurrentTranscript(text);
+                setIsVoiceInput(false);
+              }}
+              onSubmitEditing={() => { if (currentTranscript.trim()) handleConfirm(); }}
+              returnKeyType="done"
+              multiline
+            />
+          </View>
         )}
       </View>
 
@@ -272,6 +338,12 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  errorText: {
+    color: "#ff4a4a",
     fontSize: 20,
     fontWeight: "700",
     textAlign: "center",
@@ -383,5 +455,21 @@ const styles = StyleSheet.create({
   backText: {
     color: "#444",
     fontSize: 14,
+  },
+  inputArea: {
+    width: "100%",
+    alignItems: "center",
+    gap: 20,
+  },
+  textInput: {
+    width: "100%",
+    backgroundColor: "#1a1a1a",
+    borderRadius: 12,
+    padding: 16,
+    color: "#ffffff",
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: "#333",
+    minHeight: 50,
   },
 });

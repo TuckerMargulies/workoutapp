@@ -6,12 +6,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   Alert,
   Modal,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
@@ -47,21 +49,29 @@ export default function WorkoutScreen() {
   );
   const [isTrainerThinking, setIsTrainerThinking] = useState(false);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
+  const [textInput, setTextInput] = useState("");
   const [injuryPending, setInjuryPending] = useState<string | null>(null);
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exerciseIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const conversationRef = useRef<ConversationMessage[]>([]);
 
   const exercise = currentPlan?.exercises[currentExerciseIndex];
   const systemPrompt = buildSystemPrompt(userMemory);
   const workoutContext = buildWorkoutContext(currentPlan);
 
+  // Keep conversation ref in sync for use in callbacks
+  useEffect(() => {
+    conversationRef.current = conversation;
+  }, [conversation]);
+
   // Speak greeting on mount
   useEffect(() => {
     speakText(trainerMessage).catch(() => {});
     return () => { stopSpeaking().catch(() => {}); }; // stop on unmount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Global workout timer
@@ -82,12 +92,12 @@ export default function WorkoutScreen() {
   const handleVoiceInput = useCallback(async (transcript: string) => {
     const zone = triageTranscript(transcript);
 
+    // Use ref to get latest conversation for the API call
+    const currentConversation = conversationRef.current;
+
     // Add user message to conversation history
-    const updatedConversation: ConversationMessage[] = [
-      ...conversation,
-      { role: "user", content: transcript },
-    ];
-    setConversation(updatedConversation);
+    const userMsg: ConversationMessage = { role: "user", content: transcript };
+    setConversation((prev) => [...prev, userMsg]);
     setIsTrainerThinking(true);
 
     try {
@@ -101,7 +111,7 @@ export default function WorkoutScreen() {
       const response = await getTrainerResponse(
         contextualMessage,
         systemPrompt,
-        updatedConversation.slice(-6) // last 6 messages for context
+        [...currentConversation, userMsg].slice(-6) // last 6 messages for context
       );
 
       setTrainerMessage(response);
@@ -139,7 +149,7 @@ export default function WorkoutScreen() {
       setIsTrainerThinking(false);
       scrollRef.current?.scrollToEnd({ animated: true });
     }
-  }, [conversation, exercise, exerciseLogs, systemPrompt, workoutContext]);
+  }, [exercise, exerciseLogs, systemPrompt, workoutContext]);
 
   async function saveInjuryToProfile(description: string) {
     if (!userMemory) return;
@@ -325,12 +335,43 @@ export default function WorkoutScreen() {
 
         {/* Voice input */}
         <View style={styles.micArea}>
-          <MicButton
-            onTranscript={handleVoiceInput}
-            onError={(err) => Alert.alert("Mic error", err)}
-            disabled={isTrainerThinking}
-            size="md"
-          />
+          {Platform.OS !== "web" && (
+            <MicButton
+              onTranscript={handleVoiceInput}
+              onError={(err) => Alert.alert("Mic error", err)}
+              disabled={isTrainerThinking}
+              size="md"
+            />
+          )}
+          <View style={styles.textInputRow}>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Type a message..."
+              placeholderTextColor="#666"
+              value={textInput}
+              onChangeText={setTextInput}
+              onSubmitEditing={() => {
+                if (textInput.trim()) {
+                  handleVoiceInput(textInput.trim());
+                  setTextInput("");
+                }
+              }}
+              returnKeyType="send"
+              editable={!isTrainerThinking}
+            />
+            <TouchableOpacity
+              style={[styles.sendBtn, (!textInput.trim() || isTrainerThinking) && styles.sendBtnDisabled]}
+              onPress={() => {
+                if (textInput.trim()) {
+                  handleVoiceInput(textInput.trim());
+                  setTextInput("");
+                }
+              }}
+              disabled={!textInput.trim() || isTrainerThinking}
+            >
+              <Text style={styles.sendBtnText}>Send</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
 
@@ -446,7 +487,38 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   trainerMessage: { color: "#ccc", fontSize: 15, lineHeight: 22 },
-  micArea: { alignItems: "center", paddingVertical: 8, marginBottom: 8 },
+  micArea: { alignItems: "center", paddingVertical: 8, marginBottom: 8, width: "100%" },
+  textInputRow: {
+    flexDirection: "row",
+    width: "100%",
+    paddingHorizontal: 16,
+    marginTop: 8,
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: "#1a1a1a",
+    borderRadius: 10,
+    padding: 12,
+    color: "#ffffff",
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: "#333",
+  },
+  sendBtn: {
+    backgroundColor: "#e8ff4a",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    justifyContent: "center",
+  },
+  sendBtnDisabled: {
+    opacity: 0.4,
+  },
+  sendBtnText: {
+    color: "#0a0a0a",
+    fontWeight: "700",
+    fontSize: 14,
+  },
   controls: {
     flexDirection: "row",
     paddingHorizontal: 24,

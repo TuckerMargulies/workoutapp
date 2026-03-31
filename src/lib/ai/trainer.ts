@@ -1,12 +1,45 @@
 // ============================================================
 // AI Trainer Brain — Phase 1
-// Claude API integration with full user profile injection
+// Claude API integration via Supabase Edge Function (server-side key)
 // ============================================================
-import Anthropic from "@anthropic-ai/sdk";
 import { UserMemory, WorkoutPlan } from "../types";
+import { createClient } from "../supabase";
+import { z } from "zod";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+// ---- Zod schemas for LLM output validation ----
+
+const UserMemorySchema = z.object({
+  userId: z.string(),
+  fitnessLevel: z.enum(["beginner", "intermediate", "advanced"]),
+  goals: z.array(z.string()),
+  trainerName: z.string(),
+  voiceInputPreference: z.enum(["push-to-talk", "wake-word"]),
+  trainingDaysPerWeek: z.number(),
+  locationProfiles: z.array(
+    z.object({
+      name: z.string(),
+      equipment: z.array(z.string()),
+    })
+  ),
+  chronicInjuries: z.array(
+    z.object({
+      area: z.string(),
+      description: z.string(),
+      dateAdded: z.string(),
+      isRehabGoal: z.boolean(),
+    })
+  ),
+  shortTermInjuries: z.array(z.any()),
+  recentSessionSummaries: z.array(z.string()),
+  totalSessionsCompleted: z.number(),
+});
+
+const SessionSummarySchema = z.object({
+  summary: z.string(),
+  effortLevel: z.enum(["low", "moderate", "high"]),
+  painNotes: z.array(z.string()),
+  completedExercises: z.array(z.string()),
+  skippedExercises: z.array(z.string()),
 });
 
 // ---- Build system prompt from user profile ----
@@ -56,8 +89,6 @@ SAFETY RULES (non-negotiable):
       : "";
 
   const level = `\nFITNESS LEVEL: ${profile.fitnessLevel}`;
-
-  const locations = ""; // now embedded in locationEquipment
 
   const history =
     profile.recentSessionSummaries.length > 0
@@ -115,7 +146,7 @@ export async function getTrainerResponse(
   systemPrompt?: string,
   conversationHistory?: { role: "user" | "assistant"; content: string }[]
 ): Promise<string> {
-  const messages: Anthropic.MessageParam[] = [];
+  const messages: { role: "user" | "assistant"; content: string }[] = [];
 
   // Include conversation history for context within a session
   if (conversationHistory && conversationHistory.length > 0) {
@@ -126,14 +157,19 @@ export async function getTrainerResponse(
 
   messages.push({ role: "user", content: userMessage });
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 300,
-    system: systemPrompt ?? buildSystemPrompt(null),
-    messages,
+  const supabase = createClient();
+  const { data, error } = await supabase.functions.invoke("ai-chat", {
+    body: {
+      model: "claude-sonnet-4-6",
+      max_tokens: 300,
+      system: systemPrompt ?? buildSystemPrompt(null),
+      messages,
+    },
   });
 
-  return response.content[0].type === "text" ? response.content[0].text : "";
+  if (error) throw new Error(`AI chat error: ${error.message}`);
+
+  return data.content[0].type === "text" ? data.content[0].text : "";
 }
 
 // ---- Build UserMemory from onboarding Q&A ----
@@ -184,34 +220,46 @@ Rules:
 - Parse injuries carefully — only include as chronic if clearly long-term
 - Return only valid JSON, no markdown`;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 600,
-    system:
-      "You are a fitness profile parser. Extract structured data from onboarding interviews. Return only valid JSON.",
-    messages: [{ role: "user", content: message }],
+  const supabase = createClient();
+  const { data: response, error } = await supabase.functions.invoke("ai-chat", {
+    body: {
+      model: "claude-sonnet-4-6",
+      max_tokens: 600,
+      system:
+        "You are a fitness profile parser. Extract structured data from onboarding interviews. Return only valid JSON.",
+      messages: [{ role: "user", content: message }],
+    },
   });
+
+  if (error) throw new Error(`Profile extraction error: ${error.message}`);
 
   const text =
     response.content[0].type === "text" ? response.content[0].text : "{}";
 
+  const fallback: UserMemory = {
+    userId,
+    fitnessLevel: "intermediate",
+    goals: [],
+    trainerName: "Coach",
+    voiceInputPreference: "push-to-talk",
+    trainingDaysPerWeek: 4,
+    locationProfiles: [],
+    chronicInjuries: [],
+    shortTermInjuries: [],
+    recentSessionSummaries: [],
+    totalSessionsCompleted: 0,
+  };
+
   try {
-    return JSON.parse(text) as UserMemory;
+    const raw = JSON.parse(text);
+    const parsed = UserMemorySchema.safeParse(raw);
+    if (!parsed.success) {
+      console.warn("LLM profile validation failed:", parsed.error.issues);
+      return fallback;
+    }
+    return parsed.data as UserMemory;
   } catch {
-    // Fallback profile if parsing fails
-    return {
-      userId,
-      fitnessLevel: "intermediate",
-      goals: [],
-      trainerName: "Coach",
-      voiceInputPreference: "push-to-talk",
-      trainingDaysPerWeek: 4,
-      locationProfiles: [],
-      chronicInjuries: [],
-      shortTermInjuries: [],
-      recentSessionSummaries: [],
-      totalSessionsCompleted: 0,
-    };
+    return fallback;
   }
 }
 
@@ -239,25 +287,39 @@ Extract the following as JSON:
 
 Respond with only valid JSON, no markdown.`;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 400,
-    system:
-      "You are a fitness data extractor. Parse voice debriefs into structured data. Return only valid JSON.",
-    messages: [{ role: "user", content: message }],
+  const supabase = createClient();
+  const { data: response, error } = await supabase.functions.invoke("ai-chat", {
+    body: {
+      model: "claude-sonnet-4-6",
+      max_tokens: 400,
+      system:
+        "You are a fitness data extractor. Parse voice debriefs into structured data. Return only valid JSON.",
+      messages: [{ role: "user", content: message }],
+    },
   });
+
+  if (error) throw new Error(`Session summary error: ${error.message}`);
 
   const text =
     response.content[0].type === "text" ? response.content[0].text : "{}";
+
+  const fallback = {
+    summary: voiceDebrief,
+    effortLevel: "moderate" as const,
+    painNotes: [] as string[],
+    completedExercises: [] as string[],
+    skippedExercises: [] as string[],
+  };
+
   try {
-    return JSON.parse(text);
+    const raw = JSON.parse(text);
+    const parsed = SessionSummarySchema.safeParse(raw);
+    if (!parsed.success) {
+      console.warn("LLM summary validation failed:", parsed.error.issues);
+      return fallback;
+    }
+    return parsed.data;
   } catch {
-    return {
-      summary: voiceDebrief,
-      effortLevel: "moderate",
-      painNotes: [],
-      completedExercises: [],
-      skippedExercises: [],
-    };
+    return fallback;
   }
 }

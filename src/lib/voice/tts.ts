@@ -1,12 +1,11 @@
 // ============================================================
 // Text-to-Speech — Phase 6
-// ElevenLabs for high-quality trainer voice
-// Falls back to expo-speech if ElevenLabs fails or key missing
+// ElevenLabs via Supabase Edge Function for high-quality trainer voice
+// Falls back to expo-speech if Edge Function fails or is unavailable
 // ============================================================
 import { Audio } from "expo-av";
 import * as Speech from "expo-speech";
-
-const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1";
+import { createClient } from "../supabase";
 
 // Cached sound object — unload before playing new audio
 let activeSound: Audio.Sound | null = null;
@@ -18,42 +17,17 @@ async function unloadActiveSound(): Promise<void> {
   }
 }
 
-// ---- ElevenLabs TTS ----
+// ---- ElevenLabs TTS via Edge Function ----
 async function speakWithElevenLabs(text: string): Promise<void> {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM"; // Rachel (default)
+  const supabase = createClient();
+  const { data, error } = await supabase.functions.invoke("tts", {
+    body: { text },
+  });
 
-  if (!apiKey) throw new Error("No ElevenLabs API key");
+  if (error) throw new Error(`TTS error: ${error.message}`);
+  if (!data?.audioBase64) throw new Error("No audio returned from TTS");
 
-  const response = await fetch(
-    `${ELEVENLABS_BASE}/text-to-speech/${voiceId}`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-        Accept: "audio/mpeg",
-      },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_monolingual_v1",
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.2,
-          use_speaker_boost: true,
-        },
-      }),
-      signal: AbortSignal.timeout(10000),
-    }
-  );
-
-  if (!response.ok) throw new Error(`ElevenLabs error: ${response.status}`);
-
-  // Convert response to base64 data URI and play via expo-av
-  const arrayBuffer = await response.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-  const dataUri = `data:audio/mpeg;base64,${base64}`;
+  const dataUri = `data:audio/mpeg;base64,${data.audioBase64}`;
 
   await unloadActiveSound();
   await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });

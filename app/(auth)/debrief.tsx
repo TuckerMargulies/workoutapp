@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { extractSessionSummary } from "@/lib/ai/trainer";
-import { getWorkoutLogs, saveAllWorkoutLogs } from "@/lib/store";
+import { updateWorkoutLogById } from "@/lib/store";
 import MicButton from "@/components/MicButton";
 
 const EFFORT_COLORS = {
@@ -49,19 +49,15 @@ export default function DebriefScreen() {
       setSummary(extracted);
 
       // Update the matching workout log with debrief data
-      const logs = await getWorkoutLogs();
-      const idx = logs.findIndex((l) => l.id === logId);
-      if (idx >= 0) {
-        logs[idx] = {
-          ...logs[idx],
+      if (logId) {
+        await updateWorkoutLogById(logId, {
           debriefTranscript: text,
           debriefSummary: extracted.summary,
           effortLevel: extracted.effortLevel,
           painNotes: extracted.painNotes,
           completedExerciseNames: extracted.completedExercises,
           skippedExerciseNames: extracted.skippedExercises,
-        };
-        await saveAllWorkoutLogs(logs);
+        });
       }
       setSaved(true);
     } catch {

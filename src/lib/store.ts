@@ -87,6 +87,17 @@ export async function saveAllWorkoutLogs(logs: WorkoutLog[]): Promise<void> {
   await save(LOG_KEY, logs);
 }
 
+export async function updateWorkoutLogById(
+  id: string,
+  patch: Partial<WorkoutLog>
+): Promise<void> {
+  const logs = await getWorkoutLogs();
+  const idx = logs.findIndex((l) => l.id === id);
+  if (idx < 0) return;
+  logs[idx] = { ...logs[idx], ...patch };
+  await save(LOG_KEY, logs);
+}
+
 async function syncWorkoutLogToSupabase(log: WorkoutLog): Promise<void> {
   const userId = await getUserId();
   if (!userId) return;

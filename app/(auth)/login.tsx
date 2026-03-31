@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { router } from "expo-router";
 import { createClient } from "@/lib/supabase";
@@ -18,10 +17,12 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleAuth() {
+    setError(null);
     if (!email.trim() || !password.trim()) {
-      Alert.alert("Missing fields", "Please enter your email and password.");
+      setError("Please enter your email and password.");
       return;
     }
 
@@ -30,20 +31,20 @@ export default function LoginScreen() {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
+        const { error: signUpError } = await supabase.auth.signUp({ email, password });
+        if (signUpError) throw signUpError;
         // New user → go to onboarding
         router.replace("/(auth)/onboarding");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
+        if (signInError) throw signInError;
         router.replace("/(tabs)");
       }
     } catch (err: any) {
-      Alert.alert("Auth error", err.message ?? "Something went wrong.");
+      setError(err.message ?? "Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -58,6 +59,9 @@ export default function LoginScreen() {
         {/* Header */}
         <Text style={styles.title}>AI Trainer</Text>
         <Text style={styles.subtitle}>Your personal coach, powered by AI</Text>
+
+        {/* Error */}
+        {error && <Text style={styles.errorText}>{error}</Text>}
 
         {/* Form */}
         <TextInput
@@ -127,6 +131,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#888",
     marginBottom: 40,
+  },
+  errorText: {
+    color: "#ff4444",
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: "center",
   },
   input: {
     backgroundColor: "#1a1a1a",
