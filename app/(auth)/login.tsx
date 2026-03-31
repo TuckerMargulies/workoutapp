@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { createClient } from "@/lib/supabase";
 
@@ -18,6 +19,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleAuth() {
     if (!email.trim() || !password.trim()) {
@@ -32,7 +34,6 @@ export default function LoginScreen() {
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        // New user → go to onboarding
         router.replace("/(auth)/onboarding");
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -49,15 +50,24 @@ export default function LoginScreen() {
     }
   }
 
+  const isSignUpMode = isSignUp;
+
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, isSignUpMode && styles.containerSignUp]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.inner}>
+      <View style={[styles.inner, isSignUpMode && styles.innerSignUp]}>
+
         {/* Header */}
-        <Text style={styles.title}>AI Trainer</Text>
-        <Text style={styles.subtitle}>Your personal coach, powered by AI</Text>
+        <Text style={styles.title}>
+          {isSignUpMode ? "Get started" : "Welcome back"}
+        </Text>
+        <Text style={styles.subtitle}>
+          {isSignUpMode
+            ? "Create your account to begin"
+            : "Sign in to continue with your trainer"}
+        </Text>
 
         {/* Form */}
         <TextInput
@@ -69,39 +79,59 @@ export default function LoginScreen() {
           autoCapitalize="none"
           keyboardType="email-address"
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#666"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
 
+        {/* Password with eye toggle */}
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Password"
+            placeholderTextColor="#666"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+          />
+          <TouchableOpacity
+            style={styles.eyeButton}
+            onPress={() => setShowPassword(!showPassword)}
+          >
+            <Ionicons
+              name={showPassword ? "eye-off" : "eye"}
+              size={20}
+              color="#666"
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Main button */}
         <TouchableOpacity
-          style={styles.button}
+          style={[styles.button, isSignUpMode ? styles.buttonSignUp : styles.buttonSignIn]}
           onPress={handleAuth}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#0a0a0a" />
+            <ActivityIndicator color={isSignUpMode ? "#ffffff" : "#0a0a0a"} />
           ) : (
-            <Text style={styles.buttonText}>
-              {isSignUp ? "Create Account" : "Sign In"}
+            <Text style={[styles.buttonText, isSignUpMode && styles.buttonTextSignUp]}>
+              {isSignUpMode ? "Create Account" : "Sign In"}
             </Text>
           )}
         </TouchableOpacity>
 
+        {/* Toggle */}
         <TouchableOpacity
-          onPress={() => setIsSignUp(!isSignUp)}
+          onPress={() => { setIsSignUp(!isSignUp); setShowPassword(false); }}
           style={styles.toggleRow}
         >
           <Text style={styles.toggleText}>
-            {isSignUp
-              ? "Already have an account? Sign in"
-              : "New here? Create an account"}
+            {isSignUpMode
+              ? "Already have an account? "
+              : "New here? "}
+            <Text style={[styles.toggleLink, isSignUpMode ? styles.toggleLinkSignIn : styles.toggleLinkSignUp]}>
+              {isSignUpMode ? "Sign in" : "Create an account"}
+            </Text>
           </Text>
         </TouchableOpacity>
+
       </View>
     </KeyboardAvoidingView>
   );
@@ -112,10 +142,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0a0a0a",
   },
+  containerSignUp: {
+    backgroundColor: "#07080f",
+  },
   inner: {
     flex: 1,
     justifyContent: "center",
     paddingHorizontal: 28,
+  },
+  innerSignUp: {
+    justifyContent: "flex-start",
+    paddingTop: 120,
   },
   title: {
     fontSize: 36,
@@ -139,17 +176,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
   },
+  passwordContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1a1a1a",
+    borderColor: "#333",
+    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: "#ffffff",
+    fontSize: 16,
+  },
+  eyeButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
   button: {
-    backgroundColor: "#e8ff4a",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 8,
   },
+  buttonSignIn: {
+    backgroundColor: "#e8ff4a",
+  },
+  buttonSignUp: {
+    backgroundColor: "#4a9eff",
+  },
   buttonText: {
     color: "#0a0a0a",
     fontSize: 16,
     fontWeight: "700",
+  },
+  buttonTextSignUp: {
+    color: "#ffffff",
   },
   toggleRow: {
     marginTop: 24,
@@ -158,5 +223,14 @@ const styles = StyleSheet.create({
   toggleText: {
     color: "#888",
     fontSize: 14,
+  },
+  toggleLink: {
+    fontWeight: "600",
+  },
+  toggleLinkSignIn: {
+    color: "#e8ff4a",
+  },
+  toggleLinkSignUp: {
+    color: "#4a9eff",
   },
 });

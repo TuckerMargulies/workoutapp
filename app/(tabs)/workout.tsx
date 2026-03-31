@@ -278,61 +278,41 @@ export default function WorkoutScreen() {
         <Text style={styles.timer}>{formatTime(secondsElapsed)}</Text>
       </View>
 
-      {/* Scrollable content */}
-      <ScrollView
-        ref={scrollRef}
-        style={styles.content}
-        contentContainerStyle={styles.contentInner}
-      >
-        {/* Exercise demo video — Phase 5b */}
-        {exercise && (
-          <ExerciseVideo
-            exerciseName={exercise.name}
-            bodyArea={exercise.bodyArea}
-            description={exercise.description}
-          />
-        )}
-
-        {exercise && (
-          <>
-            <Text style={styles.exerciseName}>{exercise.name}</Text>
-
-            <View style={styles.statsRow}>
-              {exercise.timeBased ? (
-                <StatChip label="Time" value={formatTime(exercise.timeSec)} />
-              ) : (
-                <>
-                  <StatChip label="Sets" value={String(exercise.sets)} />
-                  <StatChip label="Reps" value={String(exercise.reps)} />
-                </>
-              )}
-              <StatChip label="Elapsed" value={formatTime(exerciseTimer)} accent />
-            </View>
-
-            <Text style={styles.description}>{exercise.description}</Text>
-          </>
-        )}
-
-        {/* Trainer bubble */}
-        <View style={styles.trainerBubble}>
-          <Text style={styles.trainerName}>{trainerName}</Text>
-          {isTrainerThinking ? (
-            <ActivityIndicator color="#e8ff4a" size="small" style={{ marginTop: 4 }} />
-          ) : (
-            <Text style={styles.trainerMessage}>{trainerMessage}</Text>
-          )}
+      {/* Exercise info (compact) */}
+      {exercise && (
+        <View style={styles.exerciseCompact}>
+          <Text style={styles.exerciseName} numberOfLines={1}>{exercise.name}</Text>
+          <View style={styles.statsRow}>
+            {exercise.timeBased ? (
+              <StatChip label="Time" value={formatTime(exercise.timeSec)} />
+            ) : (
+              <>
+                <StatChip label="Sets" value={String(exercise.sets)} />
+                <StatChip label="Reps" value={String(exercise.reps)} />
+              </>
+            )}
+            <StatChip label="Elapsed" value={formatTime(exerciseTimer)} accent />
+          </View>
         </View>
+      )}
 
-        {/* Voice input */}
-        <View style={styles.micArea}>
-          <MicButton
-            onTranscript={handleVoiceInput}
-            onError={(err) => Alert.alert("Mic error", err)}
-            disabled={isTrainerThinking}
-            size="md"
-          />
-        </View>
-      </ScrollView>
+      {/* Trainer bubble (compact) */}
+      <View style={styles.trainerBubble}>
+        <Text style={styles.trainerName}>{trainerName}</Text>
+        {isTrainerThinking ? (
+          <ActivityIndicator color="#e8ff4a" size="small" style={{ marginTop: 4 }} />
+        ) : (
+          <Text style={styles.trainerMessage} numberOfLines={3}>{trainerMessage}</Text>
+        )}
+      </View>
+
+      {/* MIC BUTTON — fills remaining space */}
+      <MicButton
+        onTranscript={handleVoiceInput}
+        onError={(err) => Alert.alert("Mic Error", err)}
+        disabled={isTrainerThinking}
+        size="full"
+      />
 
       {/* Controls */}
       <View style={styles.controls}>
@@ -396,23 +376,12 @@ const styles = StyleSheet.create({
   },
   counter: { color: "#666", fontSize: 14, fontWeight: "600" },
   timer: { color: "#666", fontSize: 14, fontWeight: "600" },
-  content: { flex: 1 },
-  contentInner: { paddingHorizontal: 24, paddingBottom: 20 },
-  videoPlaceholder: {
-    height: 200,
-    backgroundColor: "#111",
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: "#222",
-    gap: 8,
+  exerciseCompact: {
+    paddingHorizontal: 24,
+    paddingBottom: 12,
   },
-  videoPlaceholderText: { color: "#444", fontSize: 14 },
-  videoBodyArea: { color: "#333", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 },
-  exerciseName: { fontSize: 26, fontWeight: "700", color: "#ffffff", marginBottom: 16 },
-  statsRow: { flexDirection: "row", gap: 12, marginBottom: 20 },
+  exerciseName: { fontSize: 22, fontWeight: "700", color: "#ffffff", marginBottom: 10 },
+  statsRow: { flexDirection: "row", gap: 10, marginBottom: 4 },
   statChip: {
     flex: 1,
     backgroundColor: "#111",
@@ -431,11 +400,12 @@ const styles = StyleSheet.create({
   trainerBubble: {
     backgroundColor: "#111",
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: "#222",
-    marginBottom: 20,
-    minHeight: 72,
+    marginHorizontal: 24,
+    marginBottom: 8,
+    minHeight: 60,
   },
   trainerName: {
     color: "#e8ff4a",
@@ -446,7 +416,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   trainerMessage: { color: "#ccc", fontSize: 15, lineHeight: 22 },
-  micArea: { alignItems: "center", paddingVertical: 8, marginBottom: 8 },
   controls: {
     flexDirection: "row",
     paddingHorizontal: 24,

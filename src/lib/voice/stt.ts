@@ -1,14 +1,9 @@
 // ============================================================
 // Speech-to-Text — Phase 2
 // expo-av for recording + OpenAI Whisper for transcription
+// Uses FormData fetch (more reliable than base64/File on Android)
 // ============================================================
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
-});
 
 // Fitness-specific terms to help Whisper accuracy
 const WHISPER_PROMPT =
@@ -27,6 +22,12 @@ export async function requestMicPermission(): Promise<boolean> {
 
 // ---- Start recording ----
 export async function startRecording(): Promise<void> {
+  // Clean up any stale recording
+  if (activeRecording) {
+    try { await activeRecording.stopAndUnloadAsync(); } catch { /* ignore */ }
+    activeRecording = null;
+  }
+
   const hasPermission = await requestMicPermission();
   if (!hasPermission) throw new Error("Microphone permission denied");
 
@@ -45,7 +46,10 @@ export async function startRecording(): Promise<void> {
 export async function stopRecording(): Promise<string | null> {
   if (!activeRecording) return null;
 
-  await activeRecording.stopAndUnloadAsync();
+  try {
+    await activeRecording.stopAndUnloadAsync();
+  } catch { /* ignore */ }
+
   await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
   const uri = activeRecording.getURI();
@@ -53,31 +57,36 @@ export async function stopRecording(): Promise<string | null> {
   return uri ?? null;
 }
 
-// ---- Transcribe audio URI via Whisper ----
+// ---- Transcribe audio URI via Whisper (FormData fetch — reliable on Android) ----
 export async function transcribeAudio(audioUri: string): Promise<string> {
-  // Read the file as base64
-  const base64 = await FileSystem.readAsStringAsync(audioUri, {
-    encoding: "base64" as any,
+  const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OpenAI API key");
+
+  const formData = new FormData();
+  formData.append("file", {
+    uri: audioUri,
+    name: "recording.m4a",
+    type: "audio/m4a",
+  } as any);
+  formData.append("model", "whisper-1");
+  formData.append("language", "en");
+  formData.append("prompt", WHISPER_PROMPT);
+
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: formData,
   });
 
-  // Convert base64 to blob for the API
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Whisper API error: ${response.status} ${err}`);
   }
-  const byteArray = new Uint8Array(byteNumbers);
-  const blob = new Blob([byteArray], { type: "audio/m4a" });
-  const file = new File([blob], "recording.m4a", { type: "audio/m4a" });
 
-  const transcription = await openai.audio.transcriptions.create({
-    file,
-    model: "whisper-1",
-    prompt: WHISPER_PROMPT,
-    language: "en",
-  });
-
-  return transcription.text.trim();
+  const data = await response.json();
+  return (data.text ?? "").trim();
 }
 
 // ---- Convenience: stop recording + transcribe in one call ----

@@ -1,6 +1,6 @@
 // ============================================================
 // MicButton — Push-to-talk voice input component
-// Press and hold to record, release to transcribe
+// Large "full" variant fills the screen — primary workout interface
 // ============================================================
 import React, { useState, useCallback } from "react";
 import {
@@ -14,19 +14,13 @@ import {
 import { startRecording, stopAndTranscribe } from "../lib/voice/stt";
 
 interface MicButtonProps {
-  onTranscript: (text: string) => void;   // called with transcribed text
+  onTranscript: (text: string) => void;
   onError?: (error: string) => void;
   disabled?: boolean;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "full";
 }
 
 type MicState = "idle" | "recording" | "processing";
-
-const SIZES = {
-  sm: 56,
-  md: 72,
-  lg: 88,
-};
 
 export default function MicButton({
   onTranscript,
@@ -35,17 +29,19 @@ export default function MicButton({
   size = "md",
 }: MicButtonProps) {
   const [micState, setMicState] = useState<MicState>("idle");
-  const buttonSize = SIZES[size];
+
+  const isFull = size === "full";
+  const buttonSize = isFull ? 220 : size === "lg" ? 88 : size === "sm" ? 56 : 72;
 
   const handlePressIn = useCallback(async () => {
     if (disabled || micState !== "idle") return;
     try {
-      Vibration.vibrate(40); // short haptic on press
+      Vibration.vibrate(40);
       setMicState("recording");
       await startRecording();
-    } catch (e) {
+    } catch (e: any) {
       setMicState("idle");
-      onError?.("Could not start recording. Check microphone permissions.");
+      onError?.(e?.message ?? "Could not start recording.");
     }
   }, [disabled, micState, onError]);
 
@@ -55,11 +51,11 @@ export default function MicButton({
       setMicState("processing");
       const transcript = await stopAndTranscribe();
       if (transcript && transcript.length > 0) {
-        Vibration.vibrate(20); // short haptic on success
+        Vibration.vibrate(20);
         onTranscript(transcript);
       }
-    } catch (e) {
-      onError?.("Could not transcribe audio. Please try again.");
+    } catch (e: any) {
+      onError?.(e?.message ?? "Could not transcribe audio. Please try again.");
     } finally {
       setMicState("idle");
     }
@@ -69,7 +65,7 @@ export default function MicButton({
   const isProcessing = micState === "processing";
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isFull && styles.containerFull]}>
       <Pressable
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
@@ -84,21 +80,24 @@ export default function MicButton({
           isRecording && styles.buttonRecording,
           isProcessing && styles.buttonProcessing,
           disabled && styles.buttonDisabled,
+          isFull && styles.buttonFull,
         ]}
       >
         {isProcessing ? (
-          <ActivityIndicator color="#0a0a0a" size="small" />
+          <ActivityIndicator color="#0a0a0a" size="large" />
         ) : (
-          <Text style={[styles.icon, isRecording && styles.iconRecording]}>
+          <Text style={[styles.icon, isFull && styles.iconFull, isRecording && styles.iconRecording]}>
             🎤
           </Text>
         )}
       </Pressable>
-      <Text style={styles.label}>
+      <Text style={[styles.label, isFull && styles.labelFull]}>
         {isRecording
           ? "Listening..."
           : isProcessing
           ? "Processing..."
+          : disabled
+          ? "Trainer is thinking..."
           : "Hold to speak"}
       </Text>
     </View>
@@ -110,8 +109,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  containerFull: {
+    flex: 1,
+    justifyContent: "center",
+    gap: 20,
+  },
   button: {
-    backgroundColor: "#e8ff4a", // lime accent
+    backgroundColor: "#e8ff4a",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#e8ff4a",
@@ -120,11 +124,16 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
     elevation: 0,
   },
+  buttonFull: {
+    shadowOpacity: 0.15,
+    shadowRadius: 40,
+    elevation: 6,
+  },
   buttonRecording: {
-    backgroundColor: "#ff4a4a", // red while recording
+    backgroundColor: "#ff4a4a",
     shadowOpacity: 0.6,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowRadius: 24,
+    elevation: 12,
   },
   buttonProcessing: {
     backgroundColor: "#a0a0a0",
@@ -136,12 +145,20 @@ const styles = StyleSheet.create({
   icon: {
     fontSize: 24,
   },
+  iconFull: {
+    fontSize: 56,
+  },
   iconRecording: {
-    fontSize: 28,
+    fontSize: 64,
   },
   label: {
     color: "#888888",
     fontSize: 12,
     fontWeight: "500",
+  },
+  labelFull: {
+    fontSize: 16,
+    color: "#666",
+    letterSpacing: 0.5,
   },
 });
