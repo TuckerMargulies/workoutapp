@@ -262,3 +262,74 @@ Respond with only valid JSON, no markdown.`;
     };
   }
 }
+
+// ---- Generate long-term periodized training plan from interview answers ----
+export async function generateLongTermPlan(
+  answers: { question: string; answer: string }[],
+  userId: string
+): Promise<import("../types").LongTermPlan> {
+  const today = new Date().toISOString().split("T")[0];
+
+  const interviewText = answers
+    .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
+    .join("\n\n");
+
+  const prompt = `You are a world-class strength and conditioning coach. Build a detailed periodized training plan based on this athlete interview.
+
+Today's date: ${today}
+
+INTERVIEW:
+${interviewText}
+
+Create a comprehensive plan as JSON with EXACTLY this structure:
+{
+  "title": "compelling motivating plan name",
+  "targetEvent": "event name or null",
+  "targetDate": "YYYY-MM-DD or null",
+  "phases": [
+    {
+      "name": "Phase name (e.g. Recovery, Rebuild, Strength, Peak, Taper)",
+      "startDate": "YYYY-MM-DD",
+      "endDate": "YYYY-MM-DD",
+      "focus": "1-2 sentences on what this phase develops and why",
+      "weeklyStructure": "e.g. 3× strength, 2× mobility, 1× cardio",
+      "keyMilestones": ["specific measurable outcome", "specific measurable outcome"]
+    }
+  ]
+}
+
+Rules:
+- Create 4-7 phases that flow logically from current state to goal
+- Phases must be sequential with no gaps, starting from today
+- Be SPECIFIC about the athlete's actual constraints and injuries — don't be generic
+- keyMilestones should be measurable and concrete
+- If a target date was given, the final phase should end on or before it
+- Return ONLY valid JSON, no markdown, no explanation`;
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2000,
+    system: "You are a strength and conditioning coach. Return only valid JSON.",
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "{}";
+
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      id: `ltp-${Date.now()}`,
+      title: parsed.title ?? "My Training Plan",
+      goal: answers[0]?.answer ?? "",
+      targetEvent: parsed.targetEvent ?? undefined,
+      targetDate: parsed.targetDate ?? undefined,
+      limitations: answers.find((a) => a.question.toLowerCase().includes("constraint") || a.question.toLowerCase().includes("limitation"))?.answer ?? "",
+      blockers: answers.find((a) => a.question.toLowerCase().includes("held you back") || a.question.toLowerCase().includes("blocked"))?.answer ?? "",
+      phases: parsed.phases ?? [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch {
+    throw new Error("Failed to parse plan from AI response. Please try again.");
+  }
+}

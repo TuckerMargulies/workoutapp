@@ -104,6 +104,29 @@ export interface LocationConfig {
 
 export type WorkoutType = "strength" | "hiit" | "cardio" | "mobility" | "combined";
 
+// ---------- Long-term Training Plan ----------
+export interface TrainingPhase {
+  name: string;           // e.g. "Recovery", "Rebuild", "Peak"
+  startDate: string;      // ISO date
+  endDate: string;        // ISO date
+  focus: string;          // e.g. "Heal, restore mobility, address posture"
+  weeklyStructure: string; // e.g. "3× mobility, 2× strength, 1× cardio"
+  keyMilestones: string[]; // what to have achieved by end of this phase
+}
+
+export interface LongTermPlan {
+  id: string;
+  title: string;          // e.g. "Road to Beach Europeans 2026"
+  goal: string;           // user's stated primary goal
+  targetEvent?: string;   // e.g. "Beach Ultimate Europeans"
+  targetDate?: string;    // ISO date
+  limitations: string;    // key constraints (injuries, time, equipment)
+  blockers: string;       // what has held them back
+  phases: TrainingPhase[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ---------- Workout Plan (transient, used during a workout) ----------
 export interface WorkoutPlan {
   id: string;

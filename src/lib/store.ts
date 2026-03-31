@@ -14,6 +14,7 @@ import {
   WorkoutPlan,
   UserMemory,
   ShortTermInjury,
+  LongTermPlan,
 } from "./types";
 import { defaultExercises, defaultWorkoutGroups } from "../data/exercises";
 import {
@@ -140,6 +141,17 @@ async function syncPreferencesToSupabase(fields: {
 }
 
 // ---- Transient: Current Workout Plan ----
+const LONG_TERM_PLAN_KEY = "long_term_plan";
+export async function getLongTermPlan(): Promise<LongTermPlan | null> {
+  return load<LongTermPlan | null>(LONG_TERM_PLAN_KEY, null);
+}
+export async function saveLongTermPlan(plan: LongTermPlan): Promise<void> {
+  await save(LONG_TERM_PLAN_KEY, plan);
+}
+export async function clearLongTermPlan(): Promise<void> {
+  await AsyncStorage.removeItem(LONG_TERM_PLAN_KEY);
+}
+
 const PLAN_KEY = "workout_current_plan";
 export async function getCurrentPlan(): Promise<WorkoutPlan | null> {
   return load<WorkoutPlan | null>(PLAN_KEY, null);

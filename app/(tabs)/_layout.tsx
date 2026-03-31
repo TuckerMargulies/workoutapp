@@ -60,6 +60,14 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="plan"
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon emoji="🗓" label="Plan" focused={focused} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
