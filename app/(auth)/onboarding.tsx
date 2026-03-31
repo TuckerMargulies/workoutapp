@@ -85,7 +85,6 @@ type QA = { question: string; answer: string };
 export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<QA[]>([]);
-  const [currentTranscript, setCurrentTranscript] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [questions, setQuestions] = useState(BASE_QUESTIONS);
   const [useTextInput, setUseTextInput] = useState(false);
@@ -98,58 +97,89 @@ export default function OnboardingScreen() {
 
   const currentQuestion = questions[step];
   const isLastQuestion = step === questions.length - 1;
-  const progress = (step / questions.length) * 100;
-
-  // After the locations question (step 2), inject per-location equipment questions
-  function maybeInjectEquipmentQuestions(locationAnswer: string) {
-    const locations = parseLocations(locationAnswer);
-    if (locations.length === 0) return;
-
-    const equipmentQuestions = locations.map((loc) => ({
-      id: `equipment_${loc}`,
-      text: `What equipment do you have at your ${loc}? List everything — or say 'bodyweight only' if you have no equipment there.`,
-      hint: `Be specific with quantities if you can, e.g. "one 20kg kettlebell, resistance bands, dumbbells".`,
-    }));
-
-    // Insert after the locations question (index 2)
-    const updated = [
-      ...BASE_QUESTIONS.slice(0, 3),
-      ...equipmentQuestions,
-      ...BASE_QUESTIONS.slice(3),
-    ];
-    setQuestions(updated);
-  }
+  const progress = ((step + 1) / questions.length) * 100;
 
   useEffect(() => {
-    setCurrentTranscript("");
     setTextDraft("");
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }, [step]);
 
-  function handleTranscript(text: string) {
-    setCurrentTranscript(text);
+  // Build follow-up questions to inject based on question id + answer
+  function buildFollowUps(questionId: string, answer: string, currentQuestions: typeof BASE_QUESTIONS) {
+    const lower = answer.toLowerCase().trim();
+
+    if (questionId === "locations") {
+      const locs = parseLocations(answer);
+      const equipmentQs = locs.map((loc) => ({
+        id: `equipment_${loc}`,
+        text: `What equipment do you have at your ${loc}? List everything — or say 'bodyweight only'.`,
+        hint: `Be specific, e.g. "one 20kg kettlebell, resistance bands, pull-up bar".`,
+      }));
+      // If multiple locations, ask for default
+      const defaultQ = locs.length > 1 ? [{
+        id: "defaultLocation",
+        text: `Which of these — ${locs.join(", ")} — is your main workout spot?`,
+        hint: "This sets the default when you open the app.",
+      }] : [];
+      // Insert after the locations question
+      const locIdx = currentQuestions.findIndex((q) => q.id === "locations");
+      return [
+        ...currentQuestions.slice(0, locIdx + 1),
+        ...equipmentQs,
+        ...defaultQ,
+        ...currentQuestions.slice(locIdx + 1),
+      ];
+    }
+
+    if (questionId === "injuries") {
+      const noInjury = /^(none|no|nothing|nope|n\/a|all clear|i'm good|no injuries)/.test(lower);
+      if (!noInjury && lower.length > 3) {
+        const injuryFollowUps = [
+          {
+            id: "injuryAggravators",
+            text: "What makes it worse? Describe specific movements, loads, or exercises to avoid.",
+            hint: "E.g. 'deep squats, running, anything with heavy knee flexion'.",
+          },
+          {
+            id: "injuryRehab",
+            text: "Do you want me to include targeted rehab exercises for this, or just work around it?",
+            hint: "Rehab work can help recovery — but I'll follow your lead.",
+          },
+          {
+            id: "injuryDuration",
+            text: "Is this something you've been managing long-term, or a more recent injury?",
+            hint: "Helps me calibrate how cautious to be.",
+          },
+        ];
+        const injuryIdx = currentQuestions.findIndex((q) => q.id === "injuries");
+        return [
+          ...currentQuestions.slice(0, injuryIdx + 1),
+          ...injuryFollowUps,
+          ...currentQuestions.slice(injuryIdx + 1),
+        ];
+      }
+    }
+
+    return null; // no changes
   }
 
-  function handleRetry() {
-    setCurrentTranscript("");
-  }
+  // Auto-advance: called immediately when transcript/text is received — no confirm step
+  async function handleAnswer(text: string) {
+    const answer = text.trim();
+    if (!answer) return;
 
-  async function handleConfirm() {
-    if (!currentTranscript.trim()) return;
-
-    const qa: QA = {
-      question: currentQuestion.text,
-      answer: currentTranscript.trim(),
-    };
+    const qa: QA = { question: currentQuestion.text, answer };
     const updatedAnswers = [...answers, qa];
     setAnswers(updatedAnswers);
 
-    // After locations answer, inject per-location equipment questions
-    if (currentQuestion.id === "locations") {
-      maybeInjectEquipmentQuestions(currentTranscript.trim());
-    }
+    // Inject follow-up questions based on this answer
+    const updatedQuestions = buildFollowUps(currentQuestion.id, answer, questions);
+    const activeQuestions = updatedQuestions ?? questions;
+    if (updatedQuestions) setQuestions(updatedQuestions);
 
-    if (!isLastQuestion) {
+    const newIsLast = step === activeQuestions.length - 1;
+
+    if (!newIsLast) {
       setStep(step + 1);
       return;
     }
@@ -162,13 +192,19 @@ export default function OnboardingScreen() {
       setTrainerNameStore(profile.trainerName);
       setUserMemoryStore(profile);
       router.replace("/(tabs)");
-    } catch (e) {
+    } catch {
       Alert.alert(
         "Setup error",
         "Something went wrong saving your profile. Please try again.",
         [{ text: "OK", onPress: () => setIsSaving(false) }]
       );
     }
+  }
+
+  function handleBack() {
+    if (step === 0) return;
+    setAnswers(answers.slice(0, -1));
+    setStep(step - 1);
   }
 
   if (isSaving) {
@@ -222,15 +258,7 @@ export default function OnboardingScreen() {
 
       {/* Voice / text input area */}
       <View style={styles.voiceArea}>
-        {currentTranscript ? (
-          <View style={styles.transcriptContainer}>
-            <Text style={styles.transcriptLabel}>Your answer:</Text>
-            <Text style={styles.transcriptText}>{currentTranscript}</Text>
-            <TouchableOpacity onPress={handleRetry} style={styles.retryBtn}>
-              <Text style={styles.retryText}>Try again</Text>
-            </TouchableOpacity>
-          </View>
-        ) : useTextInput ? (
+        {useTextInput ? (
           <View style={styles.textInputArea}>
             <TextInput
               style={styles.textAnswerInput}
@@ -239,61 +267,41 @@ export default function OnboardingScreen() {
               value={textDraft}
               onChangeText={setTextDraft}
               multiline
-              autoFocus
             />
             <TouchableOpacity
               style={[styles.submitTextBtn, !textDraft.trim() && styles.submitTextBtnDisabled]}
               disabled={!textDraft.trim()}
-              onPress={() => {
-                handleTranscript(textDraft.trim());
-                setTextDraft("");
-              }}
+              onPress={() => { handleAnswer(textDraft); setTextDraft(""); }}
             >
-              <Text style={styles.submitTextBtnText}>Submit</Text>
+              <Text style={styles.submitTextBtnText}>
+                {isLastQuestion ? "Finish Setup" : "Next →"}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
           <MicButton
-            onTranscript={handleTranscript}
+            onTranscript={handleAnswer}
             onError={(err) => Alert.alert("Microphone error", err)}
             size="lg"
           />
         )}
 
-        {/* Toggle between mic and text */}
-        {!currentTranscript && (
-          <TouchableOpacity
-            style={styles.toggleInputBtn}
-            onPress={() => { setUseTextInput(!useTextInput); setTextDraft(""); }}
-          >
-            <Text style={styles.toggleInputText}>
-              {useTextInput ? "🎤 Use mic instead" : "⌨️ Type instead"}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Confirm button — only shown after transcript */}
-      {currentTranscript ? (
-        <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm}>
-          <Text style={styles.confirmText}>
-            {isLastQuestion ? "Complete Setup" : "Next →"}
+        <TouchableOpacity
+          style={styles.toggleInputBtn}
+          onPress={() => { setUseTextInput(!useTextInput); setTextDraft(""); }}
+        >
+          <Text style={styles.toggleInputText}>
+            {useTextInput ? "🎤 Use mic instead" : "⌨️ Type instead"}
           </Text>
         </TouchableOpacity>
-      ) : null}
+      </View>
 
-      {/* Back button */}
-      {step > 0 && !currentTranscript && (
-        <TouchableOpacity
-          onPress={() => {
-            setAnswers(answers.slice(0, -1));
-            setStep(step - 1);
-          }}
-          style={styles.backBtn}
-        >
+      {/* Back button — always visible except first question */}
+      {step > 0 ? (
+        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
-      )}
+      ) : null}
     </ScrollView>
     </KeyboardAvoidingView>
   );

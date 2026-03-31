@@ -83,28 +83,25 @@ export default function DebriefScreen() {
         skipped or struggled with.
       </Text>
 
-      {/* Voice input */}
-      {!transcript && !isSaving && (
+      {!transcript && !isSaving ? (
         <View style={styles.micArea}>
           <MicButton
             onTranscript={handleTranscript}
             onError={(err) => Alert.alert("Mic error", err)}
             size="lg"
           />
-          <Text style={styles.micHint}>Hold to speak</Text>
+          <Text style={styles.micHint}>Tap to speak</Text>
         </View>
-      )}
+      ) : null}
 
-      {/* Processing */}
-      {isSaving && (
+      {isSaving ? (
         <View style={styles.processingArea}>
           <ActivityIndicator color="#e8ff4a" size="large" />
           <Text style={styles.processingText}>Saving your session...</Text>
         </View>
-      )}
+      ) : null}
 
-      {/* Summary card */}
-      {saved && summary && (
+      {saved && summary ? (
         <View style={styles.summaryCard}>
           <View style={styles.effortRow}>
             <Text style={styles.effortLabel}>Effort</Text>
@@ -124,37 +121,30 @@ export default function DebriefScreen() {
               </Text>
             </View>
           </View>
-
           <Text style={styles.summaryText}>{summary.summary}</Text>
-
-          {summary.painNotes.length > 0 && (
+          {summary.painNotes.length > 0 ? (
             <View style={styles.painSection}>
               <Text style={styles.painLabel}>Flagged</Text>
               {summary.painNotes.map((note, i) => (
-                <Text key={i} style={styles.painNote}>
-                  ⚠ {note}
-                </Text>
+                <Text key={i} style={styles.painNote}>{"⚠ " + note}</Text>
               ))}
             </View>
-          )}
-
+          ) : null}
           <Text style={styles.savedNote}>Saved to your session history.</Text>
         </View>
-      )}
+      ) : null}
 
-      {/* Actions */}
-      {(saved || transcript) && (
+      {saved || transcript ? (
         <TouchableOpacity style={styles.doneBtn} onPress={handleDone}>
           <Text style={styles.doneBtnText}>Done</Text>
         </TouchableOpacity>
-      )}
+      ) : null}
 
-      {/* Skip */}
-      {!transcript && !isSaving && (
+      {!transcript && !isSaving ? (
         <TouchableOpacity style={styles.skipBtn} onPress={handleDone}>
           <Text style={styles.skipText}>Skip debrief</Text>
         </TouchableOpacity>
-      )}
+      ) : null}
     </ScrollView>
   );
 }

@@ -102,6 +102,8 @@ export interface LocationConfig {
   equipment: Record<string, boolean>; // equipment name => checked
 }
 
+export type WorkoutType = "strength" | "hiit" | "cardio" | "mobility" | "combined";
+
 // ---------- Workout Plan (transient, used during a workout) ----------
 export interface WorkoutPlan {
   id: string;
@@ -111,6 +113,8 @@ export interface WorkoutPlan {
   equipment: string[];
   goals: string[]; // selected goal types
   exercises: PlannedExercise[];
+  title: string;
+  workoutType: WorkoutType;
 }
 
 export interface PlannedExercise {
@@ -159,6 +163,7 @@ export interface UserMemory {
   trainerName: string; // user's chosen name for their AI trainer
   voiceInputPreference: "push-to-talk" | "wake-word"; // set during onboarding
   trainingDaysPerWeek: number; // e.g. 4
+  defaultLocation?: string; // primary workout location
   // Locations + equipment per location
   locationProfiles: LocationProfile[];
   // Injuries

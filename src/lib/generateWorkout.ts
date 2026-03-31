@@ -12,6 +12,7 @@ import {
   BreakdownPreference,
   LocationConfig,
   BioStatus,
+  WorkoutType,
 } from "./types";
 import {
   getExercises,
@@ -166,6 +167,8 @@ export async function generateWorkout(
     }
   }
 
+  const { title, workoutType } = deriveWorkoutMeta(selected);
+
   return {
     id: `wp-${Date.now()}`,
     date: new Date().toISOString(),
@@ -174,7 +177,53 @@ export async function generateWorkout(
     equipment: availableEquipment,
     goals: selectedGoals,
     exercises: selected,
+    title,
+    workoutType,
   };
+}
+
+function deriveWorkoutMeta(exercises: PlannedExercise[]): { title: string; workoutType: WorkoutType } {
+  if (exercises.length === 0) return { title: "Workout", workoutType: "combined" };
+
+  const counts: Record<string, number> = {};
+  for (const ex of exercises) {
+    counts[ex.type] = (counts[ex.type] ?? 0) + 1;
+  }
+  const total = exercises.length;
+  const pct = (type: string) => (counts[type] ?? 0) / total;
+
+  const hasHiit = exercises.some((e) => e.timeBased && (e.type === "cardio" || e.type === "agility"));
+  const resistancePct = pct("resistance");
+  const mobilityPct = pct("mobility");
+  const cardioPct = pct("cardio") + pct("agility");
+
+  let workoutType: WorkoutType;
+  let title: string;
+
+  if (hasHiit && cardioPct >= 0.4) {
+    workoutType = "hiit";
+    title = "HIIT Circuit";
+  } else if (resistancePct >= 0.6) {
+    workoutType = "strength";
+    title = "Strength Session";
+  } else if (cardioPct >= 0.6) {
+    workoutType = "cardio";
+    title = "Cardio Session";
+  } else if (mobilityPct >= 0.6) {
+    workoutType = "mobility";
+    title = "Mobility Flow";
+  } else if (resistancePct >= 0.3 && mobilityPct >= 0.3) {
+    workoutType = "combined";
+    title = "Strength + Mobility";
+  } else if (resistancePct >= 0.3 && cardioPct >= 0.3) {
+    workoutType = "combined";
+    title = "Strength + Cardio";
+  } else {
+    workoutType = "combined";
+    title = "Full Body Session";
+  }
+
+  return { title, workoutType };
 }
 
 // ---- Phase 3: Bio-filter + smart substitution ----

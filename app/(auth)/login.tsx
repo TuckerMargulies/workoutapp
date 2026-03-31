@@ -71,7 +71,13 @@ export default function LoginScreen() {
         router.replace("/(tabs)");
       }
     } catch (err: any) {
-      Alert.alert("Auth error", err.message ?? "Something went wrong.");
+      const msg = err.message ?? "Something went wrong.";
+      const hint = msg.includes("Invalid login credentials")
+        ? "\n\nTip: If you just signed up, check your email for a confirmation link — or ask your admin to disable email confirmation in Supabase."
+        : msg.includes("Email not confirmed")
+        ? "\n\nPlease check your inbox for a confirmation email, or disable email confirmation in your Supabase project settings."
+        : "";
+      Alert.alert("Sign in failed", msg + hint);
     } finally {
       setLoading(false);
     }

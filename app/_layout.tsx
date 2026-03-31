@@ -5,7 +5,10 @@ import { StatusBar } from "expo-status-bar";
 import { createClient } from "@/lib/supabase";
 import { useAppStore } from "@/lib/appStore";
 import { pullFromSupabase } from "@/lib/store";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, View, StyleSheet } from "react-native";
+
+// NativeWind v4 requires darkMode: "class" on web
+StyleSheet.setFlag?.("darkMode", "class");
 
 export default function RootLayout() {
   const setAuth = useAppStore((s) => s.setAuth);

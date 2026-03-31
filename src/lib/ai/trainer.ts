@@ -7,6 +7,7 @@ import { UserMemory, WorkoutPlan } from "../types";
 
 const client = new Anthropic({
   apiKey: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY,
+  dangerouslyAllowBrowser: true,
 });
 
 // ---- Build system prompt from user profile ----

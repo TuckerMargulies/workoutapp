@@ -12,6 +12,7 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
@@ -42,13 +43,15 @@ export default function WorkoutScreen() {
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [exerciseLogs, setExerciseLogs] = useState<WorkoutExerciseLog[]>([]);
   const [exerciseTimer, setExerciseTimer] = useState(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [trainerMessage, setTrainerMessage] = useState(
-    "Ready when you are. Hold the mic to talk to me between sets."
+    "Ready when you are. Tap the mic to talk to me between sets."
   );
   const [isTrainerThinking, setIsTrainerThinking] = useState(false);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [injuryPending, setInjuryPending] = useState<string | null>(null);
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
+  const [descriptionVisible, setDescriptionVisible] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exerciseIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -70,11 +73,21 @@ export default function WorkoutScreen() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
 
-  // Per-exercise timer
+  // Per-exercise timer + countdown for time-based exercises
   useEffect(() => {
     setExerciseTimer(0);
+    setDescriptionVisible(false);
+    const ex = currentPlan?.exercises[currentExerciseIndex];
+    if (ex?.timeBased && ex.timeSec > 0) {
+      setCountdown(ex.timeSec);
+    } else {
+      setCountdown(null);
+    }
     if (exerciseIntervalRef.current) clearInterval(exerciseIntervalRef.current);
-    exerciseIntervalRef.current = setInterval(() => setExerciseTimer((t) => t + 1), 1000);
+    exerciseIntervalRef.current = setInterval(() => {
+      setExerciseTimer((t) => t + 1);
+      setCountdown((c) => (c !== null && c > 0 ? c - 1 : c));
+    }, 1000);
     return () => { if (exerciseIntervalRef.current) clearInterval(exerciseIntervalRef.current); };
   }, [currentExerciseIndex]);
 
@@ -251,6 +264,8 @@ export default function WorkoutScreen() {
     router.replace("/(tabs)");
   }
 
+  const typeColor = workoutTypeColor(currentPlan?.workoutType ?? "combined");
+
   if (!currentPlan) {
     return (
       <View style={styles.empty}>
@@ -272,29 +287,41 @@ export default function WorkoutScreen() {
         <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
       </View>
 
-      {/* Header */}
+      {/* Header: counter + workout title + global timer */}
       <View style={styles.header}>
-        <Text style={styles.counter}>{currentExerciseIndex + 1} / {totalExercises}</Text>
-        <Text style={styles.timer}>{formatTime(secondsElapsed)}</Text>
+        <View>
+          <Text style={styles.counter}>{currentExerciseIndex + 1} / {totalExercises}</Text>
+          <Text style={styles.workoutTitle} numberOfLines={1}>{currentPlan.title}</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <View style={[styles.typeBadgeSmall, { borderColor: typeColor + "55", backgroundColor: typeColor + "18" }]}>
+            <Text style={[styles.typeBadgeSmallText, { color: typeColor }]}>{workoutTypeLabel(currentPlan.workoutType)}</Text>
+          </View>
+          <Text style={styles.timer}>{formatTime(secondsElapsed)}</Text>
+        </View>
       </View>
 
-      {/* Exercise info (compact) */}
-      {exercise && (
+      {/* Exercise info */}
+      {exercise ? (
         <View style={styles.exerciseCompact}>
-          <Text style={styles.exerciseName} numberOfLines={1}>{exercise.name}</Text>
-          <View style={styles.statsRow}>
-            {exercise.timeBased ? (
-              <StatChip label="Time" value={formatTime(exercise.timeSec)} />
-            ) : (
-              <>
-                <StatChip label="Sets" value={String(exercise.sets)} />
-                <StatChip label="Reps" value={String(exercise.reps)} />
-              </>
-            )}
-            <StatChip label="Elapsed" value={formatTime(exerciseTimer)} accent />
+          <View style={styles.exerciseNameRow}>
+            <Text style={styles.exerciseName} numberOfLines={1}>{exercise.name}</Text>
+            {/* Reps or countdown in top-right */}
+            <View style={styles.exerciseCornerBadge}>
+              {exercise.timeBased ? (
+                <Text style={[styles.exerciseCornerText, countdown === 0 && styles.exerciseCornerDone]}>
+                  {countdown !== null ? formatTime(countdown) : formatTime(exercise.timeSec)}
+                </Text>
+              ) : (
+                <Text style={styles.exerciseCornerText}>
+                  {exercise.sets > 1 ? `${exercise.sets}×${exercise.reps}` : `${exercise.reps} reps`}
+                </Text>
+              )}
+            </View>
           </View>
+          <Text style={styles.bodyAreaLabel}>{exercise.bodyArea}</Text>
         </View>
-      )}
+      ) : null}
 
       {/* Trainer bubble (compact) */}
       <View style={styles.trainerBubble}>
@@ -306,13 +333,34 @@ export default function WorkoutScreen() {
         )}
       </View>
 
-      {/* MIC BUTTON — fills remaining space */}
+      {/* MIC BUTTON */}
       <MicButton
         onTranscript={handleVoiceInput}
         onError={(err) => Alert.alert("Mic Error", err)}
         disabled={isTrainerThinking}
         size="full"
       />
+
+      {/* Description + Video buttons */}
+      {exercise ? (
+        <View style={styles.exerciseBtns}>
+          <TouchableOpacity
+            style={styles.exerciseBtn}
+            onPress={() => setDescriptionVisible(true)}
+          >
+            <Text style={styles.exerciseBtnText}>📋 Description</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.exerciseBtn}
+            onPress={() => {
+              const query = encodeURIComponent(`${exercise.name} exercise tutorial`);
+              Linking.openURL(`https://www.youtube.com/results?search_query=${query}`);
+            }}
+          >
+            <Text style={styles.exerciseBtnText}>▶ Video</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Controls */}
       <View style={styles.controls}>
@@ -325,6 +373,25 @@ export default function WorkoutScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Description modal */}
+      <Modal visible={descriptionVisible} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setDescriptionVisible(false)}
+        >
+          <View style={styles.descriptionCard}>
+            <Text style={styles.descriptionTitle}>{exercise?.name}</Text>
+            <Text style={styles.descriptionBody}>
+              {exercise?.description || "No description available."}
+            </Text>
+            <TouchableOpacity onPress={() => setDescriptionVisible(false)} style={styles.descriptionClose}>
+              <Text style={styles.descriptionCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Cancel workout modal (red triage) */}
       <Modal visible={isCancelModalVisible} transparent animationType="fade">
@@ -346,6 +413,22 @@ export default function WorkoutScreen() {
       </Modal>
     </View>
   );
+}
+
+function workoutTypeColor(type: string) {
+  const map: Record<string, string> = {
+    strength: "#e8ff4a", hiit: "#ff4a4a", cardio: "#4a9eff",
+    mobility: "#a78bfa", combined: "#e8ff4a",
+  };
+  return map[type] ?? "#e8ff4a";
+}
+
+function workoutTypeLabel(type: string) {
+  const map: Record<string, string> = {
+    strength: "Strength", hiit: "HIIT", cardio: "Cardio",
+    mobility: "Mobility", combined: "Combined",
+  };
+  return map[type] ?? type;
 }
 
 function StatChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
@@ -375,12 +458,40 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   counter: { color: "#666", fontSize: 14, fontWeight: "600" },
-  timer: { color: "#666", fontSize: 14, fontWeight: "600" },
-  exerciseCompact: {
-    paddingHorizontal: 24,
-    paddingBottom: 12,
+  workoutTitle: { color: "#ffffff", fontSize: 15, fontWeight: "700", marginTop: 2 },
+  headerRight: { alignItems: "flex-end", gap: 4 },
+  typeBadgeSmall: {
+    paddingHorizontal: 8, paddingVertical: 2,
+    borderRadius: 20, borderWidth: 1,
   },
-  exerciseName: { fontSize: 22, fontWeight: "700", color: "#ffffff", marginBottom: 10 },
+  typeBadgeSmallText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
+  timer: { color: "#666", fontSize: 14, fontWeight: "600" },
+  exerciseCompact: { paddingHorizontal: 24, paddingBottom: 8 },
+  exerciseNameRow: {
+    flexDirection: "row", alignItems: "flex-start",
+    justifyContent: "space-between", marginBottom: 4,
+  },
+  exerciseName: { fontSize: 22, fontWeight: "700", color: "#ffffff", flex: 1, marginRight: 8 },
+  exerciseCornerBadge: {
+    backgroundColor: "#1a1a1a", borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, borderColor: "#e8ff4a33",
+    minWidth: 60, alignItems: "center",
+  },
+  exerciseCornerText: { color: "#e8ff4a", fontSize: 14, fontWeight: "700" },
+  exerciseCornerDone: { color: "#4a9eff" },
+  bodyAreaLabel: { color: "#555", fontSize: 12, marginBottom: 4 },
+  exerciseBtns: {
+    flexDirection: "row", gap: 10,
+    paddingHorizontal: 24, paddingBottom: 8,
+  },
+  exerciseBtn: {
+    flex: 1, paddingVertical: 10,
+    borderRadius: 10, backgroundColor: "#111",
+    borderWidth: 1, borderColor: "#222",
+    alignItems: "center",
+  },
+  exerciseBtnText: { color: "#666", fontSize: 13, fontWeight: "600" },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 4 },
   statChip: {
     flex: 1,
@@ -488,4 +599,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalContinueText: { color: "#555", fontSize: 14 },
+  // Description modal
+  descriptionCard: {
+    margin: 24, backgroundColor: "#1a1a1a",
+    borderRadius: 20, padding: 24,
+    borderWidth: 1, borderColor: "#2a2a2a",
+  },
+  descriptionTitle: {
+    color: "#ffffff", fontSize: 20, fontWeight: "700", marginBottom: 14,
+  },
+  descriptionBody: {
+    color: "#aaa", fontSize: 15, lineHeight: 24, marginBottom: 20,
+  },
+  descriptionClose: {
+    backgroundColor: "#2a2a2a", borderRadius: 10,
+    paddingVertical: 12, alignItems: "center",
+  },
+  descriptionCloseText: { color: "#888", fontWeight: "600" },
 });
