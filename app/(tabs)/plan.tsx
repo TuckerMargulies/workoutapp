@@ -16,9 +16,9 @@ import {
   Platform,
 } from "react-native";
 import { useAppStore } from "@/lib/appStore";
-import { getLongTermPlan, saveLongTermPlan, clearLongTermPlan, getWeeklySessions, savePersonalizedExercises } from "@/lib/store";
+import { getLongTermPlan, saveLongTermPlan, clearLongTermPlan, getWeeklySessions, savePersonalizedExercises, getWeeklyTemplate, saveWeeklyTemplate } from "@/lib/store";
 import { generateLongTermPlan, researchExercisesForGoal } from "@/lib/ai/trainer";
-import { LongTermPlan, TrainingPhase, WeeklySession } from "@/lib/types";
+import { LongTermPlan, TrainingPhase, WeeklySession, WeeklyTemplate, WorkoutType } from "@/lib/types";
 import { syncWeeklySessions, skipWeeklySession, moveWeeklySession, getWeekStart } from "@/lib/planSchedule";
 import MicButton from "@/components/MicButton";
 
@@ -62,6 +62,120 @@ const PLANNING_QUESTIONS = [
 ];
 
 type QA = { question: string; answer: string };
+
+// ---- Weekly Schedule Editor component ----
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const TYPE_OPTIONS: Array<{ label: string; value: WorkoutType | "rest" | null; emoji: string }> = [
+  { label: "Unset", value: null, emoji: "·" },
+  { label: "Rest", value: "rest", emoji: "😴" },
+  { label: "Strength", value: "strength", emoji: "💪" },
+  { label: "HIIT", value: "hiit", emoji: "🔥" },
+  { label: "Cardio", value: "cardio", emoji: "🏃" },
+  { label: "Mobility", value: "mobility", emoji: "🧘" },
+  { label: "Combined", value: "combined", emoji: "🏋️" },
+];
+
+function WeeklyScheduleEditor({
+  template,
+  onDayPress,
+}: {
+  template: WeeklyTemplate;
+  onDayPress: (day: number) => void;
+}) {
+  const hasAny = Object.keys(template).length > 0;
+  return (
+    <View style={styles.scheduleSection}>
+      <Text style={styles.sectionLabel}>Weekly Schedule</Text>
+      <Text style={styles.scheduleHint}>
+        {hasAny
+          ? "Tap any day to change it. Your workouts will follow this cadence."
+          : "Set which workouts happen on which days. Tap a day to assign it."}
+      </Text>
+      <View style={styles.dayGrid}>
+        {DAY_NAMES.map((name, day) => {
+          const type = template[day];
+          const isRest = type === "rest";
+          const isSet = type !== undefined && type !== null;
+          const color = isRest ? "#333" : isSet ? workoutTypeColor(type as string) : "#222";
+          const opt = TYPE_OPTIONS.find((o) => o.value === (type ?? null));
+          return (
+            <TouchableOpacity
+              key={day}
+              style={[
+                styles.dayBox,
+                isSet && !isRest && { borderColor: color + "66", backgroundColor: color + "12" },
+                isRest && styles.dayBoxRest,
+              ]}
+              onPress={() => onDayPress(day)}
+            >
+              <Text style={styles.dayName}>{name}</Text>
+              <Text style={styles.dayEmoji}>{opt?.emoji ?? "·"}</Text>
+              {isSet && !isRest ? (
+                <Text style={[styles.dayType, { color }]}>{opt?.label ?? ""}</Text>
+              ) : isRest ? (
+                <Text style={styles.dayTypeRest}>Rest</Text>
+              ) : (
+                <Text style={styles.dayTypeUnset}>Tap</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function DayPickerModal({
+  visible,
+  day,
+  current,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  day: number | null;
+  current: WorkoutType | "rest" | null;
+  onSelect: (type: WorkoutType | "rest" | null) => void;
+  onClose: () => void;
+}) {
+  const { Modal } = require("react-native");
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalOverlayFull} activeOpacity={1} onPress={onClose}>
+        <View style={styles.dayPickerSheet} onStartShouldSetResponder={() => true}>
+          <Text style={styles.dayPickerTitle}>
+            {day !== null ? DAY_NAMES[day] : ""}
+          </Text>
+          <Text style={styles.dayPickerSubtitle}>Choose workout type</Text>
+          {TYPE_OPTIONS.map((opt) => (
+            <TouchableOpacity
+              key={String(opt.value)}
+              style={[
+                styles.dayPickerOption,
+                current === opt.value && styles.dayPickerOptionActive,
+              ]}
+              onPress={() => onSelect(opt.value)}
+            >
+              <Text style={styles.dayPickerEmoji}>{opt.emoji}</Text>
+              <Text style={[
+                styles.dayPickerLabel,
+                current === opt.value && styles.dayPickerLabelActive,
+                opt.value !== null && opt.value !== "rest" && { color: workoutTypeColor(opt.value) },
+              ]}>
+                {opt.label}
+              </Text>
+              {current === opt.value ? (
+                <Text style={styles.dayPickerCheck}>✓</Text>
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
 
 function workoutTypeColor(type: string): string {
   const map: Record<string, string> = {
@@ -116,7 +230,28 @@ export default function PlanScreen() {
   const [textDraft, setTextDraft] = useState("");
   const [expandedPhase, setExpandedPhase] = useState<number | null>(null);
   const [weeklySessions, setWeeklySessions] = useState<WeeklySession[]>([]);
+  const [weeklyTemplate, setWeeklyTemplate] = useState<WeeklyTemplate>({});
+  const [dayPickerVisible, setDayPickerVisible] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  async function setDayType(day: number, type: WorkoutType | "rest" | null) {
+    const updated = { ...weeklyTemplate };
+    if (type === null) {
+      delete updated[day];
+    } else {
+      updated[day] = type;
+    }
+    setWeeklyTemplate(updated);
+    await saveWeeklyTemplate(updated);
+    // Force re-sync sessions next time home screen loads
+    // (clear this week's cached sessions so syncWeeklySessions regenerates)
+    const existing = await getWeeklySessions();
+    const weekStart = getWeekStart();
+    const cleared = existing.filter((s) => s.weekStart !== weekStart);
+    const { saveWeeklySessions } = await import("@/lib/store");
+    await saveWeeklySessions(cleared);
+  }
 
   async function reloadSessions(activePlan?: LongTermPlan | null) {
     const p = activePlan ?? plan;
@@ -131,8 +266,9 @@ export default function PlanScreen() {
   }
 
   useEffect(() => {
-    getLongTermPlan().then(async (p) => {
+    Promise.all([getLongTermPlan(), getWeeklyTemplate()]).then(async ([p, tmpl]) => {
       setPlan(p);
+      setWeeklyTemplate(tmpl ?? {});
       setLoading(false);
       await reloadSessions(p);
     });
@@ -302,16 +438,34 @@ export default function PlanScreen() {
   // ---- NO PLAN ----
   if (!plan) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.emptyIcon}>🗓</Text>
-        <Text style={styles.emptyTitle}>No training plan yet</Text>
-        <Text style={styles.emptySubtitle}>
-          Answer 7 questions and I'll build you a personalised periodized plan — phases, milestones, and weekly structure.
-        </Text>
-        <TouchableOpacity style={styles.createBtn} onPress={startInterview}>
-          <Text style={styles.createBtnText}>Create My Plan ⚡</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView style={styles.container} contentContainerStyle={styles.inner}>
+        <View style={styles.emptyHeader}>
+          <Text style={styles.emptyIcon}>🗓</Text>
+          <Text style={styles.emptyTitle}>No training plan yet</Text>
+          <Text style={styles.emptySubtitle}>
+            Answer 7 questions and I'll build you a personalised periodized plan — phases, milestones, and weekly structure.
+          </Text>
+          <TouchableOpacity style={styles.createBtn} onPress={startInterview}>
+            <Text style={styles.createBtnText}>Create My Plan ⚡</Text>
+          </TouchableOpacity>
+        </View>
+
+        <WeeklyScheduleEditor
+          template={weeklyTemplate}
+          onDayPress={(day) => { setSelectedDay(day); setDayPickerVisible(true); }}
+        />
+
+        <DayPickerModal
+          visible={dayPickerVisible}
+          day={selectedDay}
+          current={selectedDay !== null ? weeklyTemplate[selectedDay] ?? null : null}
+          onSelect={async (type) => {
+            if (selectedDay !== null) await setDayType(selectedDay, type);
+            setDayPickerVisible(false);
+          }}
+          onClose={() => setDayPickerVisible(false)}
+        />
+      </ScrollView>
     );
   }
 
@@ -352,6 +506,12 @@ export default function PlanScreen() {
           </View>
         </View>
       ) : null}
+
+      {/* Weekly Schedule Template */}
+      <WeeklyScheduleEditor
+        template={weeklyTemplate}
+        onDayPress={(day) => { setSelectedDay(day); setDayPickerVisible(true); }}
+      />
 
       {/* This week's sessions */}
       {weeklySessions.length > 0 ? (
@@ -470,6 +630,17 @@ export default function PlanScreen() {
       >
         <Text style={styles.rebuildBtnText}>Rebuild Plan</Text>
       </TouchableOpacity>
+
+      <DayPickerModal
+        visible={dayPickerVisible}
+        day={selectedDay}
+        current={selectedDay !== null ? weeklyTemplate[selectedDay] ?? null : null}
+        onSelect={async (type) => {
+          if (selectedDay !== null) await setDayType(selectedDay, type);
+          setDayPickerVisible(false);
+        }}
+        onClose={() => setDayPickerVisible(false)}
+      />
     </ScrollView>
   );
 }
@@ -627,6 +798,47 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   sessionActionText: { color: "#555", fontSize: 11, fontWeight: "600" },
+  // Empty state (scrollable when schedule editor is present)
+  emptyHeader: { alignItems: "center", paddingVertical: 32 },
+  // Weekly schedule editor
+  scheduleSection: { marginBottom: 32 },
+  scheduleHint: { color: "#555", fontSize: 13, marginBottom: 14, lineHeight: 18 },
+  dayGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  dayBox: {
+    width: "13%", minWidth: 42, flex: 1,
+    backgroundColor: "#111", borderRadius: 12,
+    borderWidth: 1, borderColor: "#1e1e1e",
+    paddingVertical: 10, alignItems: "center", gap: 4,
+  },
+  dayBoxRest: { borderColor: "#2a2a2a", backgroundColor: "#111" },
+  dayName: { color: "#555", fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
+  dayEmoji: { fontSize: 18 },
+  dayType: { fontSize: 9, fontWeight: "700", letterSpacing: 0.3 },
+  dayTypeRest: { color: "#444", fontSize: 9 },
+  dayTypeUnset: { color: "#2a2a2a", fontSize: 9 },
+  // Day picker modal
+  modalOverlayFull: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "flex-end",
+  },
+  dayPickerSheet: {
+    backgroundColor: "#111", borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingTop: 24, paddingBottom: 48, paddingHorizontal: 20,
+  },
+  dayPickerTitle: { color: "#ffffff", fontSize: 22, fontWeight: "700", marginBottom: 4 },
+  dayPickerSubtitle: {
+    color: "#555", fontSize: 13, marginBottom: 20,
+    textTransform: "uppercase", letterSpacing: 1, fontWeight: "600",
+  },
+  dayPickerOption: {
+    flexDirection: "row", alignItems: "center",
+    paddingVertical: 14, paddingHorizontal: 12,
+    borderRadius: 10, marginBottom: 4, gap: 14,
+  },
+  dayPickerOptionActive: { backgroundColor: "#1a1a1a" },
+  dayPickerEmoji: { fontSize: 22, width: 30, textAlign: "center" },
+  dayPickerLabel: { flex: 1, color: "#888", fontSize: 16, fontWeight: "500" },
+  dayPickerLabelActive: { color: "#ffffff" },
+  dayPickerCheck: { color: "#e8ff4a", fontSize: 16, fontWeight: "700" },
   // Rebuild
   rebuildBtn: {
     marginTop: 28, paddingVertical: 14, alignItems: "center",

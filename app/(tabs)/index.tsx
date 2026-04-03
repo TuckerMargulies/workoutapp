@@ -14,7 +14,7 @@ import {
 import Slider from "@react-native-community/slider";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
-import { getLocations, getLongTermPlan } from "@/lib/store";
+import { getLocations, getLongTermPlan, getWeeklyTemplate } from "@/lib/store";
 import { generateWorkout } from "@/lib/generateWorkout";
 import { trainerCheckIn } from "@/lib/ai/trainer";
 import { syncWeeklySessions, getTodaysSession } from "@/lib/planSchedule";
@@ -103,7 +103,8 @@ export default function HomeScreen() {
     getLongTermPlan().then(async (plan) => {
       if (!plan) return;
       setLongTermPlan(plan);
-      const sessions = await syncWeeklySessions(plan);
+      const template = await getWeeklyTemplate();
+      const sessions = await syncWeeklySessions(plan, template);
       setTodaysSession(getTodaysSession(sessions));
     });
   }, []);

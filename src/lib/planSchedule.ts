@@ -2,7 +2,7 @@
 // Plan Schedule Utilities
 // Parses weekly structure → generates sessions → tracks completion
 // ============================================================
-import { LongTermPlan, TrainingPhase, WeeklySession, WorkoutType } from "./types";
+import { LongTermPlan, TrainingPhase, WeeklySession, WeeklyTemplate, WorkoutType } from "./types";
 import { getWeeklySessions, saveWeeklySessions, getWorkoutLogs } from "./store";
 
 // ---- Get Monday of a given date's week ----
@@ -53,49 +53,75 @@ export function getCurrentPhase(plan: LongTermPlan): TrainingPhase | null {
 }
 
 // ---- Generate or sync weekly sessions for the current week ----
-export async function syncWeeklySessions(plan: LongTermPlan): Promise<WeeklySession[]> {
+// template takes priority over the plan's weeklyStructure for day assignment.
+// If template is provided, specific days are locked; the plan phase still provides
+// the exercise type context for workout generation.
+export async function syncWeeklySessions(
+  plan: LongTermPlan,
+  template?: WeeklyTemplate | null
+): Promise<WeeklySession[]> {
   const weekStart = getWeekStart();
-  const phase = getCurrentPhase(plan);
-  if (!phase) return [];
 
   const existing = await getWeeklySessions();
   const thisWeek = existing.filter((s) => s.weekStart === weekStart);
-
-  // If already generated this week, return them
   if (thisWeek.length > 0) return thisWeek;
 
-  // Generate sessions for this week from phase weekly structure
-  const sessionTypes = parseWeeklyStructure(phase.weeklyStructure);
-  if (sessionTypes.length === 0) return [];
+  let newSessions: WeeklySession[];
 
-  // Distribute sessions across Mon–Sat (skip Sunday = day 6)
-  // Spread evenly, starting Monday
-  const totalSessions = sessionTypes.reduce((sum, s) => sum + s.count, 0);
-  const slots: { dayOffset: number }[] = [];
-  const maxDays = Math.min(6, totalSessions); // at most Mon–Sat
-  const spacing = 6 / totalSessions;
-  for (let i = 0; i < totalSessions; i++) {
-    slots.push({ dayOffset: Math.round(i * spacing) });
+  if (template && Object.keys(template).length > 0) {
+    // ---- Template mode: user has fixed days ----
+    newSessions = buildSessionsFromTemplate(template, weekStart);
+  } else {
+    // ---- Auto mode: distribute from plan phase weeklyStructure ----
+    const phase = getCurrentPhase(plan);
+    if (!phase) return [];
+
+    const sessionTypes = parseWeeklyStructure(phase.weeklyStructure);
+    if (sessionTypes.length === 0) return [];
+
+    const totalSessions = sessionTypes.reduce((sum, s) => sum + s.count, 0);
+    const spacing = 6 / totalSessions;
+    const slots = Array.from({ length: totalSessions }, (_, i) => ({
+      dayOffset: Math.round(i * spacing),
+    }));
+
+    const sessionList: WorkoutType[] = [];
+    for (const { type, count } of sessionTypes) {
+      for (let i = 0; i < count; i++) sessionList.push(type);
+    }
+
+    newSessions = sessionList.map((type, i) => ({
+      id: `ws-${weekStart}-${i}`,
+      weekStart,
+      plannedDate: weekDayDate(weekStart, slots[i]?.dayOffset ?? i),
+      sessionType: type,
+      status: "planned",
+    }));
   }
 
-  // Flatten session types into ordered list
-  const sessionList: WorkoutType[] = [];
-  for (const { type, count } of sessionTypes) {
-    for (let i = 0; i < count; i++) sessionList.push(type);
-  }
-
-  const newSessions: WeeklySession[] = sessionList.map((type, i) => ({
-    id: `ws-${weekStart}-${i}`,
-    weekStart,
-    plannedDate: weekDayDate(weekStart, slots[i]?.dayOffset ?? i),
-    sessionType: type,
-    status: "planned",
-  }));
-
-  // Merge with existing (keep completed/skipped from previous runs)
   const preserved = existing.filter((s) => s.weekStart !== weekStart);
   await saveWeeklySessions([...preserved, ...newSessions]);
   return newSessions;
+}
+
+function buildSessionsFromTemplate(
+  template: WeeklyTemplate,
+  weekStart: string
+): WeeklySession[] {
+  const sessions: WeeklySession[] = [];
+  // Iterate days 0–6 (Mon–Sun) in order
+  for (let day = 0; day <= 6; day++) {
+    const type = template[day];
+    if (!type || type === "rest") continue;
+    sessions.push({
+      id: `ws-${weekStart}-${day}`,
+      weekStart,
+      plannedDate: weekDayDate(weekStart, day),
+      sessionType: type as WorkoutType,
+      status: "planned",
+    });
+  }
+  return sessions;
 }
 
 // ---- Determine what session type is due today ----

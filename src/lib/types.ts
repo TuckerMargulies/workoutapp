@@ -104,6 +104,11 @@ export interface LocationConfig {
 
 export type WorkoutType = "strength" | "hiit" | "cardio" | "mobility" | "combined";
 
+// ---------- Weekly Schedule Template ----------
+// dayOfWeek: 0 = Monday, 1 = Tuesday, ..., 6 = Sunday
+// Value: WorkoutType to train, or "rest" for a rest day, or undefined = unset
+export type WeeklyTemplate = Partial<Record<number, WorkoutType | "rest">>;
+
 // ---------- Weekly Session Tracking ----------
 export interface WeeklySession {
   id: string;
