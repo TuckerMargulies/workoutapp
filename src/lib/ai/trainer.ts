@@ -3,7 +3,7 @@
 // Claude API integration with full user profile injection
 // ============================================================
 import Anthropic from "@anthropic-ai/sdk";
-import { UserMemory, WorkoutPlan } from "../types";
+import { UserMemory, WorkoutPlan, LongTermPlan, Exercise } from "../types";
 
 const client = new Anthropic({
   apiKey: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY,
@@ -331,5 +331,134 @@ Rules:
     };
   } catch {
     throw new Error("Failed to parse plan from AI response. Please try again.");
+  }
+}
+
+// ---- Research personalized exercises for a long-term plan ----
+// Called once when a plan is created. Returns 25-35 exercises tailored to
+// the user's sport, goals, equipment, and injuries.
+export async function researchExercisesForGoal(
+  plan: LongTermPlan,
+  userMemory: UserMemory | null
+): Promise<Exercise[]> {
+  const equipmentStr = userMemory?.locationProfiles
+    .map((l) => (l.equipment.length > 0 ? l.equipment.join(", ") : "bodyweight only"))
+    .join("; ") ?? "bodyweight only";
+
+  const injuryStr = userMemory?.chronicInjuries
+    .map((i) => `${i.area}: ${i.description}`)
+    .join("; ") ?? "none";
+
+  const phaseStr = plan.phases
+    .map((p) => `${p.name} (${p.weeklyStructure}): ${p.focus}`)
+    .join("\n");
+
+  const prompt = `You are a sports science expert and strength & conditioning coach.
+
+Generate a curated exercise library for this specific athlete. These exercises will be used to build all their workouts for the next several months.
+
+ATHLETE:
+- Primary goal: ${plan.goal}
+- Sport/event: ${plan.targetEvent ?? "general fitness"}
+- Fitness level: ${userMemory?.fitnessLevel ?? "intermediate"}
+- Equipment available: ${equipmentStr}
+- Injuries to avoid: ${injuryStr}
+
+TRAINING PLAN PHASES:
+${phaseStr}
+
+REQUIREMENTS:
+- Generate exactly 30 exercises
+- Cover all movement patterns: push, pull, hinge, squat, carry, rotation, gait/locomotion
+- Include exercises directly applicable to ${plan.targetEvent ?? plan.goal}
+- Include variety across types: resistance, mobility, cardio, stability, agility
+- Respect the injury constraints strictly — set contraindications correctly
+- Mix time-based (timeBased: true) and rep-based (timeBased: false) exercises
+- defaultTimeSec = total time one set takes in seconds (including brief transition, NOT rest between sets)
+- For rep-based: defaultTimeSec = defaultReps × timePerRepSec
+
+Return ONLY a valid JSON array. No markdown, no explanation. Each object must match:
+{
+  "id": "custom-[unique-kebab-slug]",
+  "name": "Exercise Name",
+  "bodyArea": "upper body push" | "upper body pull" | "lower body" | "core" | "full body",
+  "type": "resistance" | "mobility" | "cardio" | "agility" | "stability" | "rehabilitation",
+  "equipment": ["bodyweight"] or ["dumbbells"] or ["kettlebells", "mat/floor"] etc,
+  "setting": "any" | "gym" | "outdoors",
+  "timeBased": true | false,
+  "defaultTimeSec": 30,
+  "defaultReps": 10,
+  "timePerRepSec": 3,
+  "applications": ["${plan.targetEvent ?? plan.goal}"],
+  "description": "Clear 2-sentence form cue. Start position then movement.",
+  "groupIds": [],
+  "primaryMuscles": ["muscle1", "muscle2"],
+  "contraindications": [],
+  "videoAssetUrl": "",
+  "audioCueUrl": "",
+  "impactLevel": "low" | "medium" | "high",
+  "jointLoad": {}
+}`;
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 6000,
+    system: "You are a strength and conditioning expert. Return only a valid JSON array of exercises. No markdown, no explanation.",
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "[]";
+  const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return Array.isArray(parsed) ? parsed as Exercise[] : [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- Trainer check-in: user reports how they feel → adjustments ----
+export async function trainerCheckIn(
+  userMessage: string,
+  currentPlan: import("../types").LongTermPlan | null,
+  todaySessionType: string | null,
+  userMemory: import("../types").UserMemory | null
+): Promise<{
+  adjustWorkoutType: string | null;  // suggested workout type change, or null
+  workoutNote: string;               // note to show user about today's session
+  planAdjustment: string | null;     // if the plan itself should change, explain
+  trainerResponse: string;           // conversational response to show/speak
+}> {
+  const context = [
+    currentPlan ? `Current training phase: ${currentPlan.phases.find(p => {
+      const today = new Date().toISOString().split("T")[0];
+      return p.startDate <= today && p.endDate >= today;
+    })?.name ?? "unknown"}` : "No long-term plan set.",
+    todaySessionType ? `Today's planned session: ${todaySessionType}` : "No session planned for today.",
+    userMemory ? `Athlete: ${userMemory.fitnessLevel} level, goals: ${userMemory.goals.join(", ")}` : "",
+    userMemory?.chronicInjuries?.length ? `Chronic injuries: ${userMemory.chronicInjuries.map(i => i.area).join(", ")}` : "",
+  ].filter(Boolean).join("\n");
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 600,
+    system: `You are a caring, direct personal trainer. The athlete is checking in about how they feel. Respond with empathy but practical advice. Return JSON only.`,
+    messages: [{
+      role: "user",
+      content: `CONTEXT:\n${context}\n\nATHLETE SAYS: "${userMessage}"\n\nRespond as JSON:\n{\n  "adjustWorkoutType": "mobility" | "strength" | "hiit" | "cardio" | "rest" | null,\n  "workoutNote": "brief note about what to do today",\n  "planAdjustment": "if the coming week should be adjusted, explain how. null if no change needed",\n  "trainerResponse": "conversational response to speak/show the athlete (2-3 sentences, warm but direct)"\n}`
+    }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "{}";
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      adjustWorkoutType: null,
+      workoutNote: "Listen to your body today.",
+      planAdjustment: null,
+      trainerResponse: "Got it — let's make sure today's session works for how you're feeling.",
+    };
   }
 }

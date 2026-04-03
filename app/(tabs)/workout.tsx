@@ -24,6 +24,7 @@ import {
   getTrainerResponse,
 } from "@/lib/ai/trainer";
 import { triageTranscript, RED_DISCLAIMER } from "@/lib/ai/triage";
+import { completeWeeklySession } from "@/lib/planSchedule";
 import MicButton from "@/components/MicButton";
 import ExerciseVideo from "@/components/ExerciseVideo";
 import { speakText, stopSpeaking } from "@/lib/voice/tts";
@@ -44,6 +45,8 @@ export default function WorkoutScreen() {
   const [exerciseLogs, setExerciseLogs] = useState<WorkoutExerciseLog[]>([]);
   const [exerciseTimer, setExerciseTimer] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [restCountdown, setRestCountdown] = useState<number | null>(null);
+  const [pendingNextIndex, setPendingNextIndex] = useState<number>(0);
   const [trainerMessage, setTrainerMessage] = useState(
     "Ready when you are. Tap the mic to talk to me between sets."
   );
@@ -55,6 +58,7 @@ export default function WorkoutScreen() {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exerciseIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   const exercise = currentPlan?.exercises[currentExerciseIndex];
@@ -70,7 +74,10 @@ export default function WorkoutScreen() {
   // Global workout timer
   useEffect(() => {
     intervalRef.current = setInterval(() => setSecondsElapsed((s) => s + 1), 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    };
   }, []);
 
   // Per-exercise timer + countdown for time-based exercises
@@ -185,11 +192,46 @@ export default function WorkoutScreen() {
     const updatedLogs = [...exerciseLogs, log];
     setExerciseLogs(updatedLogs);
     if (currentExerciseIndex < currentPlan.exercises.length - 1) {
-      setExerciseIndex(currentExerciseIndex + 1);
-      setTrainerMessage("Good work. Ready for the next one when you are.");
+      const nextIdx = currentExerciseIndex + 1;
+      if (exercise.restSec > 0) {
+        setPendingNextIndex(nextIdx);
+        startRestCountdown(exercise.restSec, nextIdx);
+      } else {
+        setExerciseIndex(nextIdx);
+        setTrainerMessage("Good work. Ready for the next one when you are.");
+      }
     } else {
       handleFinish(updatedLogs);
     }
+  }
+
+  function startRestCountdown(restSec: number, nextIdx: number) {
+    setRestCountdown(restSec);
+    if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    restIntervalRef.current = setInterval(() => {
+      setRestCountdown((c) => {
+        if (c === null || c <= 1) {
+          if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+          restIntervalRef.current = null;
+          setExerciseIndex(nextIdx);
+          setTrainerMessage("Rest over. Let's go!");
+          return null;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  }
+
+  function skipRest() {
+    if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    restIntervalRef.current = null;
+    setRestCountdown(null);
+    setExerciseIndex(pendingNextIndex);
+    setTrainerMessage("Rest over. Let's go!");
+  }
+
+  function adjustCountdown(delta: number) {
+    setCountdown((c) => c !== null ? Math.max(0, c + delta) : null);
   }
 
   function handleSkip() {
@@ -230,6 +272,12 @@ export default function WorkoutScreen() {
     };
 
     await saveWorkoutLog(workoutLog);
+
+    // Mark the corresponding weekly session as complete (fire-and-forget)
+    if (currentPlan.workoutType) {
+      completeWeeklySession(currentPlan.workoutType, workoutLog.id).catch(() => {});
+    }
+
     endWorkout();
     // Navigate to voice debrief screen
     router.replace({ pathname: "/debrief" as any, params: { logId: workoutLog.id } });
@@ -306,20 +354,33 @@ export default function WorkoutScreen() {
         <View style={styles.exerciseCompact}>
           <View style={styles.exerciseNameRow}>
             <Text style={styles.exerciseName} numberOfLines={1}>{exercise.name}</Text>
-            {/* Reps or countdown in top-right */}
-            <View style={styles.exerciseCornerBadge}>
-              {exercise.timeBased ? (
-                <Text style={[styles.exerciseCornerText, countdown === 0 && styles.exerciseCornerDone]}>
-                  {countdown !== null ? formatTime(countdown) : formatTime(exercise.timeSec)}
-                </Text>
-              ) : (
+            {/* Timer with +/- for time-based; reps badge for rep-based */}
+            {exercise.timeBased ? (
+              <View style={styles.timerAdjustRow}>
+                <TouchableOpacity style={styles.timerAdjBtn} onPress={() => adjustCountdown(-15)}>
+                  <Text style={styles.timerAdjText}>−15</Text>
+                </TouchableOpacity>
+                <View style={styles.exerciseCornerBadge}>
+                  <Text style={[styles.exerciseCornerText, countdown === 0 && styles.exerciseCornerDone]}>
+                    {countdown !== null ? formatTime(countdown) : formatTime(exercise.timeSec)}
+                  </Text>
+                </View>
+                <TouchableOpacity style={styles.timerAdjBtn} onPress={() => adjustCountdown(15)}>
+                  <Text style={styles.timerAdjText}>+15</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.exerciseCornerBadge}>
                 <Text style={styles.exerciseCornerText}>
                   {exercise.sets > 1 ? `${exercise.sets}×${exercise.reps}` : `${exercise.reps} reps`}
                 </Text>
-              )}
-            </View>
+              </View>
+            )}
           </View>
           <Text style={styles.bodyAreaLabel}>{exercise.bodyArea}</Text>
+          {exercise.recommendedWeightKg ? (
+            <Text style={styles.weightLabel}>{"⚖ Suggested: " + exercise.recommendedWeightKg + "kg"}</Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -392,6 +453,20 @@ export default function WorkoutScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Rest period overlay */}
+      {restCountdown !== null ? (
+        <View style={styles.restOverlay}>
+          <Text style={styles.restLabel}>REST</Text>
+          <Text style={styles.restCountdownText}>{restCountdown}s</Text>
+          <Text style={styles.restNextLabel}>
+            {"Up next: " + (currentPlan.exercises[pendingNextIndex]?.name ?? "")}
+          </Text>
+          <TouchableOpacity style={styles.restSkipBtn} onPress={skipRest}>
+            <Text style={styles.restSkipText}>Skip Rest ›</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Cancel workout modal (red triage) */}
       <Modal visible={isCancelModalVisible} transparent animationType="fade">
@@ -616,4 +691,31 @@ const styles = StyleSheet.create({
     paddingVertical: 12, alignItems: "center",
   },
   descriptionCloseText: { color: "#888", fontWeight: "600" },
+  // Timer adjustment
+  timerAdjustRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  timerAdjBtn: {
+    backgroundColor: "#1a1a1a", borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 6,
+    borderWidth: 1, borderColor: "#333",
+  },
+  timerAdjText: { color: "#888", fontSize: 12, fontWeight: "700" },
+  // Weight label
+  weightLabel: { color: "#e8ff4a", fontSize: 13, fontWeight: "600", marginTop: 2 },
+  // Rest overlay
+  restOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(10,10,10,0.96)",
+    justifyContent: "center", alignItems: "center", gap: 12, zIndex: 10,
+  },
+  restLabel: {
+    color: "#555", fontSize: 13, fontWeight: "700",
+    letterSpacing: 2, textTransform: "uppercase",
+  },
+  restCountdownText: { color: "#ffffff", fontSize: 80, fontWeight: "700" },
+  restNextLabel: { color: "#555", fontSize: 14, marginTop: 4 },
+  restSkipBtn: {
+    marginTop: 24, paddingHorizontal: 28, paddingVertical: 14,
+    borderRadius: 12, borderWidth: 1, borderColor: "#2a2a2a",
+  },
+  restSkipText: { color: "#888", fontSize: 15, fontWeight: "600" },
 });

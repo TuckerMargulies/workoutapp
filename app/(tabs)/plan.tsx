@@ -16,9 +16,10 @@ import {
   Platform,
 } from "react-native";
 import { useAppStore } from "@/lib/appStore";
-import { getLongTermPlan, saveLongTermPlan, clearLongTermPlan } from "@/lib/store";
-import { generateLongTermPlan } from "@/lib/ai/trainer";
-import { LongTermPlan, TrainingPhase } from "@/lib/types";
+import { getLongTermPlan, saveLongTermPlan, clearLongTermPlan, getWeeklySessions, savePersonalizedExercises } from "@/lib/store";
+import { generateLongTermPlan, researchExercisesForGoal } from "@/lib/ai/trainer";
+import { LongTermPlan, TrainingPhase, WeeklySession } from "@/lib/types";
+import { syncWeeklySessions, skipWeeklySession, moveWeeklySession, getWeekStart } from "@/lib/planSchedule";
 import MicButton from "@/components/MicButton";
 
 // ---- Interview questions (depth of a professional athlete intake) ----
@@ -62,6 +63,18 @@ const PLANNING_QUESTIONS = [
 
 type QA = { question: string; answer: string };
 
+function workoutTypeColor(type: string): string {
+  const map: Record<string, string> = {
+    strength: "#e8ff4a", hiit: "#ff4a4a", cardio: "#4a9eff",
+    mobility: "#a78bfa", combined: "#e8ff4a",
+  };
+  return map[type] ?? "#e8ff4a";
+}
+
+function formatWeekDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
 function getCurrentPhase(plan: LongTermPlan): TrainingPhase | null {
   const today = new Date().toISOString().split("T")[0];
   return plan.phases.find((p) => p.startDate <= today && p.endDate >= today) ?? null;
@@ -91,6 +104,7 @@ const PHASE_COLORS = ["#e8ff4a", "#4a9eff", "#ff4a4a", "#a78bfa", "#4aff9e", "#f
 
 export default function PlanScreen() {
   const userId = useAppStore((s) => s.userId) ?? "local-user";
+  const userMemory = useAppStore((s) => s.userMemory);
 
   const [plan, setPlan] = useState<LongTermPlan | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,12 +115,26 @@ export default function PlanScreen() {
   const [useText, setUseText] = useState(false);
   const [textDraft, setTextDraft] = useState("");
   const [expandedPhase, setExpandedPhase] = useState<number | null>(null);
+  const [weeklySessions, setWeeklySessions] = useState<WeeklySession[]>([]);
   const scrollRef = useRef<ScrollView>(null);
 
+  async function reloadSessions(activePlan?: LongTermPlan | null) {
+    const p = activePlan ?? plan;
+    if (p) {
+      const sessions = await syncWeeklySessions(p);
+      setWeeklySessions(sessions);
+    } else {
+      const sessions = await getWeeklySessions();
+      const weekStart = getWeekStart();
+      setWeeklySessions(sessions.filter((s) => s.weekStart === weekStart));
+    }
+  }
+
   useEffect(() => {
-    getLongTermPlan().then((p) => {
+    getLongTermPlan().then(async (p) => {
       setPlan(p);
       setLoading(false);
+      await reloadSessions(p);
     });
   }, []);
 
@@ -135,13 +163,20 @@ export default function PlanScreen() {
       return;
     }
 
-    // All answered — generate plan
+    // All answered — generate plan, then research exercises in background
     setIsGenerating(true);
     setIsInInterview(false);
     try {
       const newPlan = await generateLongTermPlan(updatedAnswers, userId);
       await saveLongTermPlan(newPlan);
       setPlan(newPlan);
+
+      // Research personalised exercises for this plan (non-blocking after plan shown)
+      researchExercisesForGoal(newPlan, userMemory ?? null)
+        .then((exercises) => {
+          if (exercises.length > 0) savePersonalizedExercises(exercises);
+        })
+        .catch(() => {}); // fail silently — default library is the fallback
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "Could not generate plan. Please try again.", [
         { text: "Try Again", onPress: startInterview },
@@ -316,6 +351,65 @@ export default function PlanScreen() {
             <Text style={styles.weeklyStructureText}>📅 {currentPhase.weeklyStructure}</Text>
           </View>
         </View>
+      ) : null}
+
+      {/* This week's sessions */}
+      {weeklySessions.length > 0 ? (
+        <>
+          <Text style={styles.sectionLabel}>This Week</Text>
+          <View style={styles.weekGrid}>
+            {weeklySessions.map((session) => (
+              <View
+                key={session.id}
+                style={[
+                  styles.sessionCard,
+                  session.status === "completed" && styles.sessionCardDone,
+                  session.status === "skipped" && styles.sessionCardSkipped,
+                ]}
+              >
+                <View style={styles.sessionCardTop}>
+                  <Text style={styles.sessionDate}>
+                    {formatWeekDay(session.movedTo ?? session.plannedDate)}
+                  </Text>
+                  <Text style={[
+                    styles.sessionStatusIcon,
+                    session.status === "completed" && styles.statusIconDone,
+                    session.status === "skipped" && styles.statusIconSkipped,
+                  ]}>
+                    {session.status === "completed" ? "✓" : session.status === "skipped" ? "✗" : "·"}
+                  </Text>
+                </View>
+                <Text style={[styles.sessionType, { color: workoutTypeColor(session.sessionType) }]}>
+                  {session.sessionType.charAt(0).toUpperCase() + session.sessionType.slice(1)}
+                </Text>
+                {session.status === "planned" ? (
+                  <View style={styles.sessionActions}>
+                    <TouchableOpacity
+                      style={styles.sessionActionBtn}
+                      onPress={async () => {
+                        await skipWeeklySession(session.id);
+                        await reloadSessions();
+                      }}
+                    >
+                      <Text style={styles.sessionActionText}>Skip</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.sessionActionBtn}
+                      onPress={async () => {
+                        const tomorrow = new Date();
+                        tomorrow.setDate(tomorrow.getDate() + 1);
+                        await moveWeeklySession(session.id, tomorrow.toISOString().split("T")[0]);
+                        await reloadSessions();
+                      }}
+                    >
+                      <Text style={styles.sessionActionText}>Move →</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        </>
       ) : null}
 
       {/* All phases */}
@@ -509,6 +603,30 @@ const styles = StyleSheet.create({
   milestoneRow: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
   milestoneDot: { color: "#e8ff4a", fontSize: 9, marginTop: 4 },
   milestoneText: { color: "#777", fontSize: 13, flex: 1 },
+  // Weekly sessions grid
+  weekGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 28 },
+  sessionCard: {
+    backgroundColor: "#111", borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: "#1e1e1e", minWidth: "46%", flex: 1,
+  },
+  sessionCardDone: { borderColor: "#4aff9e33", backgroundColor: "#0a1a10" },
+  sessionCardSkipped: { borderColor: "#ff4a4a33", opacity: 0.5 },
+  sessionCardTop: {
+    flexDirection: "row", justifyContent: "space-between",
+    alignItems: "center", marginBottom: 6,
+  },
+  sessionDate: { color: "#555", fontSize: 11 },
+  sessionStatusIcon: { color: "#333", fontSize: 16, fontWeight: "700" },
+  statusIconDone: { color: "#4aff9e" },
+  statusIconSkipped: { color: "#ff4a4a" },
+  sessionType: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
+  sessionActions: { flexDirection: "row", gap: 6 },
+  sessionActionBtn: {
+    flex: 1, paddingVertical: 6, borderRadius: 6,
+    backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#2a2a2a",
+    alignItems: "center",
+  },
+  sessionActionText: { color: "#555", fontSize: 11, fontWeight: "600" },
   // Rebuild
   rebuildBtn: {
     marginTop: 28, paddingVertical: 14, alignItems: "center",

@@ -10,14 +10,16 @@ import {
   Alert,
   Modal,
   TextInput,
-  FlatList,
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
-import { getLocations } from "@/lib/store";
+import { getLocations, getLongTermPlan } from "@/lib/store";
 import { generateWorkout } from "@/lib/generateWorkout";
-import { LocationConfig, WorkoutPlan, PlannedExercise } from "@/lib/types";
+import { trainerCheckIn } from "@/lib/ai/trainer";
+import { syncWeeklySessions, getTodaysSession } from "@/lib/planSchedule";
+import { LocationConfig, WorkoutPlan, LongTermPlan, WeeklySession } from "@/lib/types";
+import MicButton from "@/components/MicButton";
 
 const MIN_MINS = 10;
 const MAX_MINS = 120;
@@ -70,30 +72,72 @@ export default function HomeScreen() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
 
+  // Plan awareness
+  const [longTermPlan, setLongTermPlan] = useState<LongTermPlan | null>(null);
+  const [todaysSession, setTodaysSession] = useState<WeeklySession | null>(null);
+
   // Preview state
   const [previewPlan, setPreviewPlan] = useState<WorkoutPlan | null>(null);
   const [adjustText, setAdjustText] = useState("");
+
+  // Tell Me (check-in) modal
+  const [tellMeVisible, setTellMeVisible] = useState(false);
+  const [checkInText, setCheckInText] = useState("");
+  const [checkInLoading, setCheckInLoading] = useState(false);
+  const [checkInResult, setCheckInResult] = useState<{
+    trainerResponse: string;
+    workoutNote: string;
+    adjustWorkoutType: string | null;
+    planAdjustment: string | null;
+  } | null>(null);
 
   useEffect(() => {
     getLocations().then((locs) => {
       const available = locs.filter((l) => l.available);
       setLocations(available);
-      // Pre-select: use user's default location if available, else first
       const defaultLoc = userMemory?.defaultLocation;
       const match = available.find((l) => l.name.toLowerCase() === defaultLoc?.toLowerCase());
       setSelectedLocation(match?.name ?? available[0]?.name ?? "Home");
+    });
+
+    getLongTermPlan().then(async (plan) => {
+      if (!plan) return;
+      setLongTermPlan(plan);
+      const sessions = await syncWeeklySessions(plan);
+      setTodaysSession(getTodaysSession(sessions));
     });
   }, []);
 
   async function handleGenerate() {
     setIsGenerating(true);
     try {
-      const plan = await generateWorkout(timeSecs, selectedLocation, null, []);
+      // Use today's planned session type if available (and not overridden by check-in)
+      const sessionType = checkInResult?.adjustWorkoutType ?? todaysSession?.sessionType ?? undefined;
+      const plan = await generateWorkout(timeSecs, selectedLocation, null, [], undefined, sessionType);
       setPreviewPlan(plan);
     } catch (err: any) {
       Alert.alert("Error", err.message ?? "Could not generate workout.");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  async function handleCheckIn(text: string) {
+    if (!text.trim()) return;
+    setCheckInLoading(true);
+    try {
+      const result = await trainerCheckIn(
+        text,
+        longTermPlan,
+        todaysSession?.sessionType ?? null,
+        userMemory ?? null
+      );
+      setCheckInResult(result);
+    } catch {
+      Alert.alert("Error", "Could not reach trainer. Please try again.");
+    } finally {
+      setCheckInLoading(false);
+      setCheckInText("");
     }
   }
 
@@ -209,56 +253,102 @@ export default function HomeScreen() {
   }
 
   // ---- SETUP SCREEN ----
+  const activeSession = checkInResult?.adjustWorkoutType
+    ? { sessionType: checkInResult.adjustWorkoutType as any, plannedDate: "" }
+    : todaysSession;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.inner}>
-      <View style={styles.header}>
-        <Text style={styles.greeting}>{greeting}</Text>
-        <Text style={styles.subheading}>Ready to train?</Text>
-      </View>
-
-      {/* Time slider */}
-      <Text style={styles.sectionLabel}>How long?</Text>
-      <View style={styles.sliderContainer}>
-        <Text style={styles.sliderValue}>{formatMins(timeSecs)}</Text>
-        <Slider
-          style={styles.slider}
-          minimumValue={MIN_MINS * 60}
-          maximumValue={MAX_MINS * 60}
-          step={STEP_MINS * 60}
-          value={timeSecs}
-          onValueChange={setTimeSecs}
-          minimumTrackTintColor="#e8ff4a"
-          maximumTrackTintColor="#2a2a2a"
-          thumbTintColor="#e8ff4a"
-        />
-        <View style={styles.sliderLabels}>
-          <Text style={styles.sliderEndLabel}>{MIN_MINS} min</Text>
-          <Text style={styles.sliderEndLabel}>{MAX_MINS} min</Text>
+    <View style={styles.screenWrapper}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.inner}>
+        <View style={styles.header}>
+          <Text style={styles.greeting}>{greeting}</Text>
+          <Text style={styles.subheading}>Ready to train?</Text>
         </View>
-      </View>
 
-      {/* Location dropdown */}
-      <Text style={styles.sectionLabel}>Where are you?</Text>
-      <TouchableOpacity
-        style={styles.locationDropdown}
-        onPress={() => setLocationModalVisible(true)}
-      >
-        <Text style={styles.locationDropdownEmoji}>{locationEmoji(selectedLocation)}</Text>
-        <Text style={styles.locationDropdownText}>{selectedLocation || "Select location"}</Text>
-        <Text style={styles.locationDropdownChevron}>›</Text>
-      </TouchableOpacity>
+        {/* Today's session from plan */}
+        {activeSession ? (
+          <View style={styles.todayBanner}>
+            <View style={styles.todayBannerLeft}>
+              <Text style={styles.todayLabel}>TODAY'S SESSION</Text>
+              <Text style={styles.todayType}>
+                {activeSession.sessionType.charAt(0).toUpperCase() + activeSession.sessionType.slice(1)}
+              </Text>
+              {checkInResult?.workoutNote ? (
+                <Text style={styles.todayNote}>{checkInResult.workoutNote}</Text>
+              ) : null}
+            </View>
+            <View style={[styles.todayDot, { backgroundColor: workoutTypeColor(activeSession.sessionType) }]} />
+          </View>
+        ) : null}
 
-      {/* Generate button */}
+        {/* Trainer check-in response */}
+        {checkInResult?.trainerResponse ? (
+          <View style={styles.checkInResponse}>
+            <Text style={styles.checkInResponseText}>{checkInResult.trainerResponse}</Text>
+            {checkInResult.planAdjustment ? (
+              <Text style={styles.planAdjNote}>{"📋 Plan note: " + checkInResult.planAdjustment}</Text>
+            ) : null}
+            <TouchableOpacity onPress={() => setCheckInResult(null)} style={styles.checkInDismiss}>
+              <Text style={styles.checkInDismissText}>Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Time slider */}
+        <Text style={styles.sectionLabel}>How long?</Text>
+        <View style={styles.sliderContainer}>
+          <Text style={styles.sliderValue}>{formatMins(timeSecs)}</Text>
+          <Slider
+            style={styles.slider}
+            minimumValue={MIN_MINS * 60}
+            maximumValue={MAX_MINS * 60}
+            step={STEP_MINS * 60}
+            value={timeSecs}
+            onValueChange={setTimeSecs}
+            minimumTrackTintColor="#e8ff4a"
+            maximumTrackTintColor="#2a2a2a"
+            thumbTintColor="#e8ff4a"
+          />
+          <View style={styles.sliderLabels}>
+            <Text style={styles.sliderEndLabel}>{MIN_MINS} min</Text>
+            <Text style={styles.sliderEndLabel}>{MAX_MINS} min</Text>
+          </View>
+        </View>
+
+        {/* Location dropdown */}
+        <Text style={styles.sectionLabel}>Where are you?</Text>
+        <TouchableOpacity
+          style={styles.locationDropdown}
+          onPress={() => setLocationModalVisible(true)}
+        >
+          <Text style={styles.locationDropdownEmoji}>{locationEmoji(selectedLocation)}</Text>
+          <Text style={styles.locationDropdownText}>{selectedLocation || "Select location"}</Text>
+          <Text style={styles.locationDropdownChevron}>›</Text>
+        </TouchableOpacity>
+
+        {/* Generate button */}
+        <TouchableOpacity
+          style={[styles.generateBtn, isGenerating && styles.generateBtnDisabled]}
+          onPress={handleGenerate}
+          disabled={isGenerating}
+        >
+          {isGenerating ? (
+            <ActivityIndicator color="#0a0a0a" />
+          ) : (
+            <Text style={styles.generateText}>Plan My Workout ⚡</Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Bottom padding so FAB doesn't cover content */}
+        <View style={{ height: 80 }} />
+      </ScrollView>
+
+      {/* Floating "Tell me" button */}
       <TouchableOpacity
-        style={[styles.generateBtn, isGenerating && styles.generateBtnDisabled]}
-        onPress={handleGenerate}
-        disabled={isGenerating}
+        style={styles.tellMeBtn}
+        onPress={() => setTellMeVisible(true)}
       >
-        {isGenerating ? (
-          <ActivityIndicator color="#0a0a0a" />
-        ) : (
-          <Text style={styles.generateText}>Plan My Workout ⚡</Text>
-        )}
+        <Text style={styles.tellMeBtnText}>Tell me 💬</Text>
       </TouchableOpacity>
 
       {/* Location picker modal */}
@@ -294,15 +384,77 @@ export default function HomeScreen() {
                 ]}>
                   {loc.name}
                 </Text>
-                {selectedLocation === loc.name && (
+                {selectedLocation === loc.name ? (
                   <Text style={styles.modalCheckmark}>✓</Text>
-                )}
+                ) : null}
               </TouchableOpacity>
             ))}
           </View>
         </TouchableOpacity>
       </Modal>
-    </ScrollView>
+
+      {/* Tell Me modal */}
+      <Modal
+        visible={tellMeVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTellMeVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setTellMeVisible(false)}
+        >
+          <View style={styles.tellMeSheet} onStartShouldSetResponder={() => true}>
+            <Text style={styles.tellMeTitle}>Check in</Text>
+            <Text style={styles.tellMeSubtitle}>
+              How are you feeling? Sore, tired, injured, traveling? I'll adjust your workout.
+            </Text>
+
+            <MicButton
+              size="md"
+              onTranscript={(text) => {
+                setCheckInText(text);
+                handleCheckIn(text);
+                setTellMeVisible(false);
+              }}
+              onError={(err) => Alert.alert("Mic error", err)}
+            />
+
+            <View style={styles.tellMeInputRow}>
+              <TextInput
+                style={styles.tellMeInput}
+                placeholder="Or type here..."
+                placeholderTextColor="#444"
+                value={checkInText}
+                onChangeText={setCheckInText}
+                multiline
+                returnKeyType="done"
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.generateBtn,
+                (!checkInText.trim() || checkInLoading) && styles.generateBtnDisabled,
+              ]}
+              onPress={() => {
+                if (!checkInText.trim()) return;
+                handleCheckIn(checkInText);
+                setTellMeVisible(false);
+              }}
+              disabled={!checkInText.trim() || checkInLoading}
+            >
+              {checkInLoading ? (
+                <ActivityIndicator color="#0a0a0a" />
+              ) : (
+                <Text style={styles.generateText}>Send to trainer</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
   );
 }
 
@@ -320,6 +472,7 @@ function formatTime(secs: number): string {
 }
 
 const styles = StyleSheet.create({
+  screenWrapper: { flex: 1, backgroundColor: "#0a0a0a" },
   container: { flex: 1, backgroundColor: "#0a0a0a" },
   inner: { paddingHorizontal: 24, paddingTop: 64, paddingBottom: 40 },
   header: { marginBottom: 40 },
@@ -424,4 +577,49 @@ const styles = StyleSheet.create({
     paddingVertical: 18, alignItems: "center",
   },
   startBtnText: { color: "#0a0a0a", fontSize: 17, fontWeight: "700" },
+  // Today's session banner
+  todayBanner: {
+    backgroundColor: "#111", borderRadius: 12, borderWidth: 1, borderColor: "#2a2a2a",
+    padding: 16, marginBottom: 24, flexDirection: "row",
+    alignItems: "center", justifyContent: "space-between",
+  },
+  todayBannerLeft: { flex: 1 },
+  todayLabel: {
+    color: "#555", fontSize: 11, fontWeight: "700",
+    letterSpacing: 1, textTransform: "uppercase", marginBottom: 4,
+  },
+  todayType: { color: "#ffffff", fontSize: 22, fontWeight: "700" },
+  todayNote: { color: "#888", fontSize: 13, marginTop: 4 },
+  todayDot: { width: 12, height: 12, borderRadius: 6, marginLeft: 12 },
+  // Trainer check-in response card
+  checkInResponse: {
+    backgroundColor: "#111", borderRadius: 12, borderWidth: 1, borderColor: "#2a2a2a",
+    padding: 16, marginBottom: 24,
+  },
+  checkInResponseText: { color: "#ddd", fontSize: 14, lineHeight: 20 },
+  planAdjNote: { color: "#888", fontSize: 12, marginTop: 8, fontStyle: "italic" },
+  checkInDismiss: { marginTop: 12, alignSelf: "flex-end" },
+  checkInDismissText: { color: "#555", fontSize: 13 },
+  // Floating "Tell me" button
+  tellMeBtn: {
+    position: "absolute", bottom: 32, right: 24,
+    backgroundColor: "#e8ff4a", borderRadius: 24,
+    paddingVertical: 12, paddingHorizontal: 20,
+    shadowColor: "#e8ff4a", shadowOpacity: 0.3, shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 }, elevation: 8,
+  },
+  tellMeBtnText: { color: "#0a0a0a", fontSize: 15, fontWeight: "700" },
+  // Tell Me modal sheet
+  tellMeSheet: {
+    backgroundColor: "#111", borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingTop: 28, paddingBottom: 48, paddingHorizontal: 24, gap: 16,
+  },
+  tellMeTitle: { color: "#ffffff", fontSize: 22, fontWeight: "700" },
+  tellMeSubtitle: { color: "#666", fontSize: 14, lineHeight: 20 },
+  tellMeInputRow: { marginTop: 4 },
+  tellMeInput: {
+    backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#2a2a2a",
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
+    color: "#ffffff", fontSize: 15, minHeight: 80, textAlignVertical: "top",
+  },
 });

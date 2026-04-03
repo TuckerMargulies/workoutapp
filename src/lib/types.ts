@@ -104,6 +104,18 @@ export interface LocationConfig {
 
 export type WorkoutType = "strength" | "hiit" | "cardio" | "mobility" | "combined";
 
+// ---------- Weekly Session Tracking ----------
+export interface WeeklySession {
+  id: string;
+  weekStart: string;           // ISO date of Monday
+  plannedDate: string;         // ISO date originally planned
+  sessionType: WorkoutType;
+  status: "planned" | "completed" | "skipped" | "moved";
+  completedDate?: string;
+  workoutLogId?: string;
+  movedTo?: string;            // ISO date if rescheduled
+}
+
 // ---------- Long-term Training Plan ----------
 export interface TrainingPhase {
   name: string;           // e.g. "Recovery", "Rebuild", "Peak"
@@ -147,9 +159,11 @@ export interface PlannedExercise {
   sets: number;
   reps: number;
   timeSec: number;
+  restSec: number;             // rest between sets (seconds)
   description: string;
   bodyArea: string;
   type: ExerciseType;
+  recommendedWeightKg?: number; // for strength exercises, suggested starting weight
 }
 
 // ---- Phase 1+: Injury Classification ----

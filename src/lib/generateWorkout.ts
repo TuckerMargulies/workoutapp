@@ -20,6 +20,7 @@ import {
   getWorkoutLogs,
   getBreakdownPreferences,
   getLocations,
+  getPersonalizedExercises,
 } from "./store";
 
 /**
@@ -36,15 +37,44 @@ export async function generateWorkout(
   locationName: string,
   equipmentOverride: string[] | null,
   selectedGoals: string[],
-  bioStatus?: BioStatus
+  bioStatus?: BioStatus,
+  requiredType?: string  // from long-term plan schedule
 ): Promise<WorkoutPlan> {
   const usableTime = Math.floor(totalTimeSec * 0.9); // 90% cap
 
-  const allExercises = await getExercises();
-  const allGroups = await getWorkoutGroups();
-  const logs = await getWorkoutLogs();
-  const breakdownPrefs = await getBreakdownPreferences();
-  const locations = await getLocations();
+  const [allExercises, personalizedExercises, allGroups, logs, breakdownPrefs, locations] =
+    await Promise.all([
+      getExercises(),
+      getPersonalizedExercises(),
+      getWorkoutGroups(),
+      getWorkoutLogs(),
+      getBreakdownPreferences(),
+      getLocations(),
+    ]);
+
+  // Merge personalized exercises into the library (override by id if duplicate)
+  const personalizedIds = new Set(personalizedExercises.map((e) => e.id));
+  const mergedExercises = [
+    ...allExercises.filter((e) => !personalizedIds.has(e.id)),
+    ...personalizedExercises,
+  ];
+
+  // Build recency map from last 14 days of logs: exerciseId → daysSinceLastUse
+  const now = Date.now();
+  const dayMs = 86_400_000;
+  const cutoff = now - 14 * dayMs;
+  const recencyMap: Record<string, number> = {};
+  for (const log of logs) {
+    const logDate = new Date(log.date).getTime();
+    if (logDate < cutoff) continue;
+    const daysSince = (now - logDate) / dayMs;
+    for (const ex of log.exercises) {
+      const prev = recencyMap[ex.exerciseId];
+      if (prev === undefined || daysSince < prev) {
+        recencyMap[ex.exerciseId] = daysSince;
+      }
+    }
+  }
 
   // Resolve equipment
   const loc = locations.find((l) => l.name === locationName);
@@ -57,7 +87,7 @@ export async function generateWorkout(
       : []);
 
   // Filter exercises by location setting + available equipment
-  let eligible = allExercises.filter((ex) => {
+  let eligible = mergedExercises.filter((ex) => {
     if (
       ex.setting !== "any" &&
       ex.setting.toLowerCase() !== locationName.toLowerCase()
@@ -72,13 +102,24 @@ export async function generateWorkout(
 
   // Phase 3: Bio-status filter — remove contraindicated exercises
   if (bioStatus && bioStatus.flaggedRegions.length > 0) {
-    eligible = applyBioFilter(eligible, bioStatus, allExercises);
+    eligible = applyBioFilter(eligible, bioStatus, mergedExercises);
   }
 
   // Decide what types to include
+  // requiredType from plan takes precedence over selectedGoals
   let targetTypes: { type: string; weight: number }[] = [];
 
-  if (selectedGoals.length > 0) {
+  if (requiredType && requiredType !== "combined") {
+    // Map plan workout types to exercise types
+    const typeMap: Record<string, string[]> = {
+      strength: ["resistance"],
+      hiit: ["cardio", "agility"],
+      cardio: ["cardio"],
+      mobility: ["mobility", "rehabilitation"],
+    };
+    const mapped = typeMap[requiredType] ?? [requiredType];
+    targetTypes = mapped.map((t) => ({ type: t, weight: 1 }));
+  } else if (selectedGoals.length > 0) {
     targetTypes = selectedGoals.map((g) => ({ type: g, weight: 1 }));
   } else {
     targetTypes = await pickTypesFromHistory(breakdownPrefs, logs);
@@ -114,7 +155,7 @@ export async function generateWorkout(
       );
     }
 
-    shuffleArray(candidateExercises);
+    weightedVariationShuffle(candidateExercises, recencyMap, personalizedIds);
 
     for (const ex of candidateExercises) {
       if (remainingTime <= 0) break;
@@ -130,9 +171,15 @@ export async function generateWorkout(
         sets: ex.timeBased ? 1 : 3,
         reps: ex.defaultReps,
         timeSec: ex.timeBased ? ex.defaultTimeSec : ex.defaultTimeSec * 3,
+        restSec: ex.timeBased ? 20 : 60,
         description: ex.description,
         bodyArea: ex.bodyArea,
         type: ex.type,
+        recommendedWeightKg: ex.equipment.includes("kettlebells")
+          ? 16
+          : ex.equipment.includes("dumbbells")
+          ? 10
+          : undefined,
       });
 
       remainingTime -= ex.timeBased
@@ -147,7 +194,7 @@ export async function generateWorkout(
       (e) =>
         e.type === "mobility" && !selected.some((s) => s.exerciseId === e.id)
     );
-    shuffleArray(fillers);
+    weightedVariationShuffle(fillers, recencyMap, personalizedIds);
     for (const ex of fillers) {
       if (remainingTime <= 60) break;
       const t = ex.defaultTimeSec;
@@ -159,6 +206,7 @@ export async function generateWorkout(
         sets: 1,
         reps: ex.defaultReps,
         timeSec: t,
+        restSec: 30,
         description: ex.description,
         bodyArea: ex.bodyArea,
         type: ex.type,
@@ -269,6 +317,52 @@ function applyBioFilter(
 }
 
 // ---- Helpers ----
+
+/**
+ * Weighted in-place shuffle that surfaces:
+ *  - Exercises not used recently (higher weight)
+ *  - Personalized (sport-specific) exercises (1.3× boost)
+ *  - Recently used exercises pushed toward the end (lower weight)
+ *
+ * Weight tiers by days since last use:
+ *   < 2 days  → 0.1  (strongly avoid repeating)
+ *   2-4 days  → 0.5
+ *   4-7 days  → 0.8
+ *   7+ days   → 1.0
+ *   never     → 1.1  (slight boost for fresh exercises)
+ *   personalized → multiply by 1.3
+ */
+function weightedVariationShuffle(
+  arr: Exercise[],
+  recencyMap: Record<string, number>,
+  personalizedIds: Set<string>
+): void {
+  function weight(ex: Exercise): number {
+    const days = recencyMap[ex.id];
+    let w: number;
+    if (days === undefined) w = 1.1;
+    else if (days < 2) w = 0.1;
+    else if (days < 4) w = 0.5;
+    else if (days < 7) w = 0.8;
+    else w = 1.0;
+    if (personalizedIds.has(ex.id)) w *= 1.3;
+    return w;
+  }
+
+  // Weighted Fisher-Yates
+  for (let i = arr.length - 1; i > 0; i--) {
+    // Build cumulative weights for arr[0..i]
+    const weights = arr.slice(0, i + 1).map(weight);
+    const total = weights.reduce((s, w) => s + w, 0);
+    let rand = Math.random() * total;
+    let j = 0;
+    while (j < i && rand > weights[j]) {
+      rand -= weights[j];
+      j++;
+    }
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
 
 async function pickTypesFromHistory(
   prefs: BreakdownPreference[],
