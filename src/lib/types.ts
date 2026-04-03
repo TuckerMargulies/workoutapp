@@ -50,6 +50,16 @@ export interface WorkoutGroup {
 }
 
 // ---------- Database 2: Tracking ----------
+
+// One actual set logged during a workout (voice or manual)
+export interface ActualSet {
+  setNumber: number;
+  reps: number;
+  weightKg?: number; // strength: barbell/dumbbell weight used
+  timeSec?: number; // HIIT: work interval duration
+  note?: string; // "failed", "easy", "PR" etc.
+}
+
 export interface WorkoutLog {
   id: string;
   date: string; // ISO date
@@ -73,9 +83,10 @@ export interface WorkoutExerciseLog {
   exerciseId: string;
   exerciseName: string;
   timeSec: number; // time actually spent
-  reps: number; // reps completed (0 for time-based)
+  reps: number; // total reps (sum of actualSets, or plan value if not logged)
   timePerRepSec: number; // calculated
   completed: boolean;
+  actualSets?: ActualSet[]; // voice-logged per-set data
 }
 
 // ---- Phase 2+: Voice adjustment during workout ----

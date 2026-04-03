@@ -18,7 +18,7 @@ import {
 import { router } from "expo-router";
 import { useAppStore } from "@/lib/appStore";
 import { saveWorkoutLog, updateShortTermInjury } from "@/lib/store";
-import { WorkoutExerciseLog, WorkoutLog, ShortTermInjury, VoiceAdjustment } from "@/lib/types";
+import { WorkoutExerciseLog, WorkoutLog, ShortTermInjury, VoiceAdjustment, ActualSet } from "@/lib/types";
 import {
   buildSystemPrompt,
   buildWorkoutContext,
@@ -26,6 +26,7 @@ import {
 } from "@/lib/ai/trainer";
 import { triageTranscript, RED_DISCLAIMER } from "@/lib/ai/triage";
 import { completeWeeklySession } from "@/lib/planSchedule";
+import { parseSetLog } from "@/lib/ai/parseSetLog";
 import MicButton from "@/components/MicButton";
 import { speakText, stopSpeaking } from "@/lib/voice/tts";
 
@@ -61,6 +62,16 @@ export default function WorkoutScreen() {
   const [injuryPending, setInjuryPending] = useState<string | null>(null);
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
   const [descriptionVisible, setDescriptionVisible] = useState(false);
+
+  // ---- Set logging state ----
+  // Map of exerciseId → logged sets (voice or tap)
+  const [loggedSets, setLoggedSets] = useState<Map<string, ActualSet[]>>(new Map());
+  // Last confirmed weight so user can say just "8 reps" on subsequent sets
+  const [lastLoggedWeight, setLastLoggedWeight] = useState<number | null>(null);
+  // Reps logged during HIIT rest interval
+  const [hiitRestReps, setHiitRestReps] = useState<number | null>(null);
+  // Whether the set-log mic is actively processing (prevents overlap with trainer mic)
+  const [isSetLogProcessing, setIsSetLogProcessing] = useState(false);
 
   // Slide-up controls panel
   const [controlsExpanded, setControlsExpanded] = useState(false);
@@ -105,6 +116,7 @@ export default function WorkoutScreen() {
   useEffect(() => {
     setExerciseTimer(0);
     setDescriptionVisible(false);
+    setHiitRestReps(null); // clear HIIT rep log for new exercise
     const ex = currentPlan?.exercises[currentExerciseIndex];
     if (ex?.timeBased && ex.timeSec > 0) {
       setCountdown(ex.timeSec);
@@ -216,15 +228,77 @@ export default function WorkoutScreen() {
     await updateShortTermInjury(userMemory.userId, injury);
   }
 
+  // ---- Set logging handlers ----
+
+  /** Called by the inline set-log mic for strength/combined exercises */
+  async function handleSetLog(transcript: string) {
+    if (!exercise) return;
+    setIsSetLogProcessing(true);
+    try {
+      const exId = exercise.exerciseId;
+      const existing = loggedSets.get(exId) ?? [];
+      const newSets = await parseSetLog(transcript, lastLoggedWeight, existing.length + 1);
+      if (newSets.length === 0) return;
+
+      // Remember last weight for next call
+      const lastWeight = newSets[newSets.length - 1].weightKg ?? null;
+      if (lastWeight) setLastLoggedWeight(lastWeight);
+
+      const updated = new Map(loggedSets);
+      updated.set(exId, [...existing, ...newSets]);
+      setLoggedSets(updated);
+    } catch {
+      // Silent — don't interrupt the workout
+    } finally {
+      setIsSetLogProcessing(false);
+    }
+  }
+
+  /** Called by the mic in the HIIT rest overlay — logs reps from the work interval */
+  async function handleHiitRestRepLog(transcript: string) {
+    if (!exercise) return;
+    setIsSetLogProcessing(true);
+    try {
+      const exId = exercise.exerciseId;
+      const existing = loggedSets.get(exId) ?? [];
+      const newSets = await parseSetLog(transcript, null, existing.length + 1);
+      if (newSets.length === 0) return;
+
+      const reps = newSets[0].reps;
+      setHiitRestReps(reps);
+
+      const updated = new Map(loggedSets);
+      // For HIIT, store the timeSec of the work interval alongside reps
+      updated.set(exId, [
+        ...existing,
+        { setNumber: existing.length + 1, reps, timeSec: exercise.timeSec },
+      ]);
+      setLoggedSets(updated);
+    } catch {
+      // Silent
+    } finally {
+      setIsSetLogProcessing(false);
+    }
+  }
+
   // ---- Exercise logging ----
   function logCurrentExercise(completed: boolean): WorkoutExerciseLog {
+    const exId = exercise?.exerciseId ?? "";
+    const sets = loggedSets.get(exId);
+    const totalReps = sets
+      ? sets.reduce((sum, s) => sum + s.reps, 0)
+      : exercise?.timeBased
+      ? 0
+      : exercise?.reps ?? 0;
+
     return {
-      exerciseId: exercise?.exerciseId ?? "",
+      exerciseId: exId,
       exerciseName: exercise?.name ?? "",
       timeSec: exerciseTimer,
-      reps: exercise?.timeBased ? 0 : (exercise?.reps ?? 0),
+      reps: totalReps,
       timePerRepSec: exercise?.timeBased || !exercise?.reps ? 0 : exerciseTimer / exercise.reps,
       completed,
+      actualSets: sets && sets.length > 0 ? sets : undefined,
     };
   }
 
@@ -453,6 +527,16 @@ export default function WorkoutScreen() {
         </View>
       ) : null}
 
+      {/* Set logger — strength/combined/cardio rep-based exercises */}
+      {exercise && !isHIIT && !exercise.timeBased ? (
+        <SetLogger
+          exercise={exercise}
+          loggedSets={loggedSets.get(exercise.exerciseId) ?? []}
+          isProcessing={isSetLogProcessing}
+          onLog={handleSetLog}
+        />
+      ) : null}
+
       {/* Video section */}
       {exercise ? (
         <TouchableOpacity
@@ -581,6 +665,30 @@ export default function WorkoutScreen() {
           <Text style={styles.restNextLabel}>
             {"Up next: " + (currentPlan.exercises[pendingNextIndex]?.name ?? "")}
           </Text>
+
+          {/* HIIT: log reps from work interval */}
+          {isHIIT && (
+            <View style={styles.restRepLogRow}>
+              {hiitRestReps !== null ? (
+                <View style={styles.restRepConfirmed}>
+                  <Text style={styles.restRepConfirmedText}>
+                    {"✓ " + hiitRestReps + " reps logged"}
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.restRepPrompt}>How many reps this round?</Text>
+                  <MicButton
+                    size="sm"
+                    onTranscript={handleHiitRestRepLog}
+                    onError={() => {}}
+                    disabled={isSetLogProcessing}
+                  />
+                </>
+              )}
+            </View>
+          )}
+
           <TouchableOpacity style={styles.restSkipBtn} onPress={skipRest}>
             <Text style={styles.restSkipText}>Skip Rest ›</Text>
           </TouchableOpacity>
@@ -608,6 +716,104 @@ export default function WorkoutScreen() {
     </View>
   );
 }
+
+// ---- SetLogger: inline set tracking for strength/cardio rep exercises ----
+function SetLogger({
+  exercise,
+  loggedSets,
+  isProcessing,
+  onLog,
+}: {
+  exercise: { name: string; sets: number; reps: number; recommendedWeightKg?: number };
+  loggedSets: ActualSet[];
+  isProcessing: boolean;
+  onLog: (transcript: string) => void;
+}) {
+  const nextSetNum = loggedSets.length + 1;
+  const allSetsLogged = loggedSets.length >= exercise.sets;
+
+  return (
+    <View style={setLogStyles.container}>
+      {/* Logged sets row */}
+      {loggedSets.length > 0 && (
+        <View style={setLogStyles.setsRow}>
+          {loggedSets.map((s) => (
+            <View key={s.setNumber} style={setLogStyles.setChip}>
+              <Text style={setLogStyles.setChipText}>
+                {`${s.reps}r`}
+                {s.weightKg ? ` · ${s.weightKg}kg` : ""}
+                {s.note ? ` (${s.note})` : ""}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Prompt for next set */}
+      {!allSetsLogged && (
+        <View style={setLogStyles.promptRow}>
+          <View style={setLogStyles.promptText}>
+            <Text style={setLogStyles.setLabel}>
+              {`Set ${nextSetNum} of ${exercise.sets}`}
+            </Text>
+            <Text style={setLogStyles.setHint}>
+              {exercise.recommendedWeightKg
+                ? `Say reps + weight (e.g. "8 reps 80kg")`
+                : `Say how many reps (e.g. "got 8")`}
+            </Text>
+          </View>
+          <MicButton
+            size="sm"
+            onTranscript={onLog}
+            onError={() => {}}
+            disabled={isProcessing}
+          />
+        </View>
+      )}
+
+      {allSetsLogged && (
+        <Text style={setLogStyles.allDoneText}>✓ All sets logged</Text>
+      )}
+    </View>
+  );
+}
+
+const setLogStyles = StyleSheet.create({
+  container: {
+    marginHorizontal: 24,
+    marginBottom: 8,
+    backgroundColor: "#0d1a0d",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#1a2e1a",
+    padding: 12,
+  },
+  setsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  setChip: {
+    backgroundColor: "#1a2e1a",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#2a4a2a",
+  },
+  setChipText: { color: "#4aff88", fontSize: 12, fontWeight: "600" },
+  promptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  promptText: { flex: 1 },
+  setLabel: { color: "#4aff88", fontSize: 13, fontWeight: "700" },
+  setHint: { color: "#3a6a3a", fontSize: 11, marginTop: 2 },
+  allDoneText: { color: "#4aff88", fontSize: 12, fontWeight: "600" },
+});
 
 function workoutTypeColor(type: string) {
   const map: Record<string, string> = {
@@ -843,4 +1049,13 @@ const styles = StyleSheet.create({
     borderRadius: 12, borderWidth: 1, borderColor: "#2a2a2a",
   },
   restSkipText: { color: "#888", fontSize: 15, fontWeight: "600" },
+  // HIIT rest rep logging
+  restRepLogRow: {
+    alignItems: "center", gap: 10, marginTop: 16, marginBottom: 8,
+    backgroundColor: "#0d1a0d", borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: "#1a2e1a", minWidth: 200,
+  },
+  restRepPrompt: { color: "#4aff88", fontSize: 14, fontWeight: "600" },
+  restRepConfirmed: { alignItems: "center" },
+  restRepConfirmedText: { color: "#4aff88", fontSize: 16, fontWeight: "700" },
 });
