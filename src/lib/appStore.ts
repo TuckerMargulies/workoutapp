@@ -4,6 +4,7 @@
 // ============================================================
 import { create } from "zustand";
 import { WorkoutPlan, BioStatus, UserMemory } from "./types";
+import { VoiceCommandAction } from "./ai/voiceCommands";
 
 interface AppState {
   // Auth
@@ -27,6 +28,9 @@ interface AppState {
   isListening: boolean;
   lastTranscript: string;
 
+  // Global voice command bus — screens read and clear this
+  pendingVoiceCommand: VoiceCommandAction | null;
+
   // Actions
   setAuth: (userId: string, email: string) => void;
   clearAuth: () => void;
@@ -40,6 +44,7 @@ interface AppState {
   setTrainerSpeaking: (speaking: boolean) => void;
   setListening: (listening: boolean) => void;
   setLastTranscript: (transcript: string) => void;
+  setPendingVoiceCommand: (cmd: VoiceCommandAction | null) => void;
   startWorkout: () => void;
   endWorkout: () => void;
 }
@@ -62,6 +67,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   isListening: false,
   lastTranscript: "",
+
+  pendingVoiceCommand: null,
 
   // Actions
   setAuth: (userId, email) =>
@@ -97,6 +104,8 @@ export const useAppStore = create<AppState>((set) => ({
   setListening: (listening) => set({ isListening: listening }),
 
   setLastTranscript: (transcript) => set({ lastTranscript: transcript }),
+
+  setPendingVoiceCommand: (cmd) => set({ pendingVoiceCommand: cmd }),
 
   startWorkout: () => set({ isWorkoutActive: true, currentExerciseIndex: 0 }),
 

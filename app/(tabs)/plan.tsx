@@ -136,6 +136,7 @@ function ReschedulePickerModal({
 }
 
 // ---- Weekly Schedule Editor component ----
+function WeeklyScheduleEditor({
   template,
   onDayPress,
 }: {
