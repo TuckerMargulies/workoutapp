@@ -19,7 +19,10 @@ import { useAppStore } from "@/lib/appStore";
 import { getLongTermPlan, saveLongTermPlan, clearLongTermPlan, getWeeklySessions, savePersonalizedExercises, getWeeklyTemplate, saveWeeklyTemplate } from "@/lib/store";
 import { generateLongTermPlan, researchExercisesForGoal } from "@/lib/ai/trainer";
 import { LongTermPlan, TrainingPhase, WeeklySession, WeeklyTemplate, WorkoutType } from "@/lib/types";
-import { syncWeeklySessions, skipWeeklySession, moveWeeklySession, getWeekStart } from "@/lib/planSchedule";
+import {
+  syncWeeklySessions, skipWeeklySession, moveWeeklySession, getWeekStart,
+  isSessionOverdue, getRescheduleDates, rescheduleSession, autoRescheduleAll,
+} from "@/lib/planSchedule";
 import MicButton from "@/components/MicButton";
 
 // ---- Interview questions (depth of a professional athlete intake) ----
@@ -77,7 +80,62 @@ const TYPE_OPTIONS: Array<{ label: string; value: WorkoutType | "rest" | null; e
   { label: "Combined", value: "combined", emoji: "🏋️" },
 ];
 
-function WeeklyScheduleEditor({
+// ---- Reschedule picker modal ----
+function ReschedulePickerModal({
+  visible,
+  dates,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  dates: ReturnType<typeof getRescheduleDates>;
+  onSelect: (date: string) => void;
+  onClose: () => void;
+}) {
+  const { Modal, ScrollView: SV } = require("react-native");
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalOverlayFull} activeOpacity={1} onPress={onClose}>
+        <View style={styles.dayPickerSheet} onStartShouldSetResponder={() => true}>
+          <Text style={styles.dayPickerTitle}>Reschedule to</Text>
+          <Text style={styles.dayPickerSubtitle}>Choose a date — template days are marked</Text>
+          <SV style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+            {dates.map((item) => {
+              const isTemplateDay = item.templateType && item.templateType !== "rest";
+              const color = isTemplateDay ? workoutTypeColor(item.templateType as string) : "#555";
+              return (
+                <TouchableOpacity
+                  key={item.date}
+                  style={[styles.rescheduleOption, item.occupied && styles.rescheduleOptionOccupied]}
+                  onPress={() => !item.occupied && onSelect(item.date)}
+                  disabled={item.occupied}
+                >
+                  <View style={styles.rescheduleOptionLeft}>
+                    <Text style={styles.rescheduleDay}>{item.shortDay}</Text>
+                    <Text style={styles.rescheduleDate}>{item.date.slice(5).replace("-", " / ")}</Text>
+                  </View>
+                  {isTemplateDay ? (
+                    <View style={[styles.reschedulePill, { borderColor: color + "55", backgroundColor: color + "18" }]}>
+                      <Text style={[styles.reschedulePillText, { color }]}>
+                        {(item.templateType as string).charAt(0).toUpperCase() + (item.templateType as string).slice(1)}
+                      </Text>
+                    </View>
+                  ) : item.occupied ? (
+                    <Text style={styles.rescheduleOccupied}>occupied</Text>
+                  ) : (
+                    <Text style={styles.rescheduleFree}>Free ›</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </SV>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+// ---- Weekly Schedule Editor component ----
   template,
   onDayPress,
 }: {
@@ -233,7 +291,38 @@ export default function PlanScreen() {
   const [weeklyTemplate, setWeeklyTemplate] = useState<WeeklyTemplate>({});
   const [dayPickerVisible, setDayPickerVisible] = useState(false);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  // Reschedule picker
+  const [rescheduleSession_id, setRescheduleSessionId] = useState<string | null>(null);
+  const [rescheduleDates, setRescheduleDates] = useState<ReturnType<typeof getRescheduleDates>>([]);
+  const [reschedulePickerVisible, setReschedulePickerVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  function openReschedulePicker(sessionId: string) {
+    const dates = getRescheduleDates(weeklyTemplate, weeklySessions, 14);
+    setRescheduleDates(dates);
+    setRescheduleSessionId(sessionId);
+    setReschedulePickerVisible(true);
+  }
+
+  async function handleReschedule(targetDate: string) {
+    if (!rescheduleSession_id) return;
+    const updated = await rescheduleSession(rescheduleSession_id, targetDate);
+    const weekStart = getWeekStart();
+    setWeeklySessions(updated.filter((s) => s.weekStart === weekStart));
+    setReschedulePickerVisible(false);
+    setRescheduleSessionId(null);
+  }
+
+  async function handleAutoReschedule() {
+    const { rescheduled, sessions } = await autoRescheduleAll(weeklyTemplate);
+    const weekStart = getWeekStart();
+    setWeeklySessions(sessions.filter((s) => s.weekStart === weekStart));
+    if (rescheduled === 0) {
+      Alert.alert("Nothing to reschedule", "No free slots found in the next 3 weeks.");
+    } else {
+      Alert.alert("Done", `${rescheduled} session${rescheduled > 1 ? "s" : ""} rescheduled to the next free day${rescheduled > 1 ? "s" : ""}.`);
+    }
+  }
 
   async function setDayType(day: number, type: WorkoutType | "rest" | null) {
     const updated = { ...weeklyTemplate };
@@ -465,6 +554,12 @@ export default function PlanScreen() {
           }}
           onClose={() => setDayPickerVisible(false)}
         />
+        <ReschedulePickerModal
+          visible={reschedulePickerVisible}
+          dates={rescheduleDates}
+          onSelect={handleReschedule}
+          onClose={() => { setReschedulePickerVisible(false); setRescheduleSessionId(null); }}
+        />
       </ScrollView>
     );
   }
@@ -516,61 +611,86 @@ export default function PlanScreen() {
       {/* This week's sessions */}
       {weeklySessions.length > 0 ? (
         <>
-          <Text style={styles.sectionLabel}>This Week</Text>
+          <View style={styles.weekHeader}>
+            <Text style={styles.sectionLabel}>This Week</Text>
+            {weeklySessions.some(isSessionOverdue) ? (
+              <TouchableOpacity onPress={handleAutoReschedule} style={styles.autoRescheduleBtn}>
+                <Text style={styles.autoRescheduleBtnText}>Reschedule all missed →</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <View style={styles.weekGrid}>
-            {weeklySessions.map((session) => (
-              <View
-                key={session.id}
-                style={[
-                  styles.sessionCard,
-                  session.status === "completed" && styles.sessionCardDone,
-                  session.status === "skipped" && styles.sessionCardSkipped,
-                ]}
-              >
-                <View style={styles.sessionCardTop}>
-                  <Text style={styles.sessionDate}>
-                    {formatWeekDay(session.movedTo ?? session.plannedDate)}
-                  </Text>
-                  <Text style={[
-                    styles.sessionStatusIcon,
-                    session.status === "completed" && styles.statusIconDone,
-                    session.status === "skipped" && styles.statusIconSkipped,
-                  ]}>
-                    {session.status === "completed" ? "✓" : session.status === "skipped" ? "✗" : "·"}
-                  </Text>
-                </View>
-                <Text style={[styles.sessionType, { color: workoutTypeColor(session.sessionType) }]}>
-                  {session.sessionType.charAt(0).toUpperCase() + session.sessionType.slice(1)}
-                </Text>
-                {session.status === "planned" ? (
-                  <View style={styles.sessionActions}>
-                    <TouchableOpacity
-                      style={styles.sessionActionBtn}
-                      onPress={async () => {
-                        await skipWeeklySession(session.id);
-                        await reloadSessions();
-                      }}
-                    >
-                      <Text style={styles.sessionActionText}>Skip</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.sessionActionBtn}
-                      onPress={async () => {
-                        const tomorrow = new Date();
-                        tomorrow.setDate(tomorrow.getDate() + 1);
-                        await moveWeeklySession(session.id, tomorrow.toISOString().split("T")[0]);
-                        await reloadSessions();
-                      }}
-                    >
-                      <Text style={styles.sessionActionText}>Move →</Text>
-                    </TouchableOpacity>
+            {weeklySessions.map((session) => {
+              const overdue = isSessionOverdue(session);
+              return (
+                <View
+                  key={session.id}
+                  style={[
+                    styles.sessionCard,
+                    overdue && styles.sessionCardOverdue,
+                    session.status === "completed" && styles.sessionCardDone,
+                    session.status === "skipped" && styles.sessionCardSkipped,
+                  ]}
+                >
+                  <View style={styles.sessionCardTop}>
+                    <Text style={styles.sessionDate}>
+                      {formatWeekDay(session.movedTo ?? session.plannedDate)}
+                    </Text>
+                    <Text style={[
+                      styles.sessionStatusIcon,
+                      overdue && styles.statusIconOverdue,
+                      session.status === "completed" && styles.statusIconDone,
+                      session.status === "skipped" && styles.statusIconSkipped,
+                    ]}>
+                      {session.status === "completed" ? "✓" : session.status === "skipped" ? "✗" : overdue ? "!" : "·"}
+                    </Text>
                   </View>
-                ) : null}
-              </View>
-            ))}
+                  <Text style={[styles.sessionType, { color: workoutTypeColor(session.sessionType) }]}>
+                    {session.sessionType.charAt(0).toUpperCase() + session.sessionType.slice(1)}
+                  </Text>
+                  {session.status === "planned" ? (
+                    <View style={styles.sessionActions}>
+                      {overdue ? (
+                        <TouchableOpacity
+                          style={[styles.sessionActionBtn, styles.sessionActionBtnPrimary]}
+                          onPress={() => openReschedulePicker(session.id)}
+                        >
+                          <Text style={styles.sessionActionTextPrimary}>Reschedule</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            style={styles.sessionActionBtn}
+                            onPress={async () => {
+                              await skipWeeklySession(session.id);
+                              await reloadSessions();
+                            }}
+                          >
+                            <Text style={styles.sessionActionText}>Skip</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.sessionActionBtn}
+                            onPress={() => openReschedulePicker(session.id)}
+                          >
+                            <Text style={styles.sessionActionText}>Move →</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
           </View>
         </>
       ) : null}
+
+      <ReschedulePickerModal
+        visible={reschedulePickerVisible}
+        dates={rescheduleDates}
+        onSelect={handleReschedule}
+        onClose={() => { setReschedulePickerVisible(false); setRescheduleSessionId(null); }}
+      />
 
       {/* All phases */}
       <Text style={styles.sectionLabel}>All Phases</Text>
@@ -774,6 +894,17 @@ const styles = StyleSheet.create({
   milestoneRow: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
   milestoneDot: { color: "#e8ff4a", fontSize: 9, marginTop: 4 },
   milestoneText: { color: "#777", fontSize: 13, flex: 1 },
+  // This Week header row
+  weekHeader: {
+    flexDirection: "row", justifyContent: "space-between",
+    alignItems: "center", marginBottom: 12,
+  },
+  autoRescheduleBtn: {
+    backgroundColor: "#ff9e2218", borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1, borderColor: "#ff9e2244",
+  },
+  autoRescheduleBtnText: { color: "#ff9e22", fontSize: 11, fontWeight: "700" },
   // Weekly sessions grid
   weekGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 28 },
   sessionCard: {
@@ -782,6 +913,7 @@ const styles = StyleSheet.create({
   },
   sessionCardDone: { borderColor: "#4aff9e33", backgroundColor: "#0a1a10" },
   sessionCardSkipped: { borderColor: "#ff4a4a33", opacity: 0.5 },
+  sessionCardOverdue: { borderColor: "#ff9e2255", backgroundColor: "#1a0f00" },
   sessionCardTop: {
     flexDirection: "row", justifyContent: "space-between",
     alignItems: "center", marginBottom: 6,
@@ -790,6 +922,7 @@ const styles = StyleSheet.create({
   sessionStatusIcon: { color: "#333", fontSize: 16, fontWeight: "700" },
   statusIconDone: { color: "#4aff9e" },
   statusIconSkipped: { color: "#ff4a4a" },
+  statusIconOverdue: { color: "#ff9e22" },
   sessionType: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
   sessionActions: { flexDirection: "row", gap: 6 },
   sessionActionBtn: {
@@ -797,7 +930,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#2a2a2a",
     alignItems: "center",
   },
+  sessionActionBtnPrimary: {
+    backgroundColor: "#1a0f00", borderColor: "#ff9e2255",
+  },
   sessionActionText: { color: "#555", fontSize: 11, fontWeight: "600" },
+  sessionActionTextPrimary: { color: "#ff9e22", fontSize: 11, fontWeight: "700" },
+  // Reschedule picker
+  rescheduleOption: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: "#1a1a1a",
+  },
+  rescheduleOptionOccupied: { opacity: 0.35 },
+  rescheduleOptionLeft: { flexDirection: "row", alignItems: "baseline", gap: 10 },
+  rescheduleDay: { color: "#ffffff", fontSize: 15, fontWeight: "700", width: 32 },
+  rescheduleDate: { color: "#555", fontSize: 13 },
+  reschedulePill: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 20, borderWidth: 1,
+  },
+  reschedulePillText: { fontSize: 11, fontWeight: "700" },
+  rescheduleOccupied: { color: "#333", fontSize: 12 },
+  rescheduleFree: { color: "#4aff9e", fontSize: 13, fontWeight: "600" },
   // Empty state (scrollable when schedule editor is present)
   emptyHeader: { alignItems: "center", paddingVertical: 32 },
   // Weekly schedule editor

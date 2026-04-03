@@ -183,3 +183,140 @@ export async function moveWeeklySession(sessionId: string, newDate: string): Pro
     await saveWeeklySessions(sessions);
   }
 }
+
+// ---- Ad-hoc reshuffling helpers ----
+
+/** True if a planned session's effective date is before today. */
+export function isSessionOverdue(session: WeeklySession): boolean {
+  const today = new Date().toISOString().split("T")[0];
+  const effectiveDate = session.movedTo ?? session.plannedDate;
+  return session.status === "planned" && effectiveDate < today;
+}
+
+/** js getDay() → Mon-based offset (0=Mon … 6=Sun) */
+function toMonOffset(jsDay: number): number {
+  return jsDay === 0 ? 6 : jsDay - 1;
+}
+
+/**
+ * Returns the next `daysAhead` dates from today with context:
+ * - templateType: what the weekly template assigns that weekday (or null)
+ * - occupied: whether a session is already planned on that date
+ */
+export function getRescheduleDates(
+  template: WeeklyTemplate,
+  sessions: WeeklySession[],
+  daysAhead = 14
+): Array<{
+  date: string;
+  shortDay: string;
+  templateType: WorkoutType | "rest" | null;
+  occupied: boolean;
+}> {
+  const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const result = [];
+  const base = new Date();
+
+  for (let i = 0; i < daysAhead; i++) {
+    const d = new Date(base);
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().split("T")[0];
+    const offset = toMonOffset(d.getDay());
+    const templateType = (template[offset] as WorkoutType | "rest") ?? null;
+    const occupied = sessions.some(
+      (s) =>
+        (s.movedTo === dateStr || s.plannedDate === dateStr) &&
+        s.status === "planned"
+    );
+    result.push({ date: dateStr, shortDay: DAY_SHORT[offset], templateType, occupied });
+  }
+
+  return result;
+}
+
+/**
+ * Reschedule a single overdue session: marks it skipped, inserts a makeup on targetDate.
+ * Returns the full updated sessions list.
+ */
+export async function rescheduleSession(
+  sessionId: string,
+  targetDate: string
+): Promise<WeeklySession[]> {
+  const sessions = await getWeeklySessions();
+
+  const idx = sessions.findIndex((s) => s.id === sessionId);
+  if (idx < 0) return sessions;
+
+  const original = sessions[idx];
+  // Mark original as skipped
+  sessions[idx] = { ...original, status: "skipped" };
+
+  // Create makeup session (weekStart of the target date)
+  const makeup: WeeklySession = {
+    id: `makeup-${Date.now()}`,
+    weekStart: getWeekStart(new Date(targetDate)),
+    plannedDate: targetDate,
+    sessionType: original.sessionType,
+    status: "planned",
+  };
+  sessions.push(makeup);
+
+  await saveWeeklySessions(sessions);
+  return sessions;
+}
+
+/**
+ * Auto-reschedule ALL overdue planned sessions into the next available free slots.
+ * Free slot = no template session AND no existing planned session for that date.
+ * Template days are skipped (kept intact). Returns count rescheduled.
+ */
+export async function autoRescheduleAll(
+  template: WeeklyTemplate
+): Promise<{ rescheduled: number; sessions: WeeklySession[] }> {
+  let sessions = await getWeeklySessions();
+  const today = new Date().toISOString().split("T")[0];
+
+  // All overdue planned sessions, oldest first
+  const overdue = sessions
+    .filter((s) => isSessionOverdue(s))
+    .sort((a, b) => (a.movedTo ?? a.plannedDate).localeCompare(b.movedTo ?? b.plannedDate));
+
+  if (overdue.length === 0) return { rescheduled: 0, sessions };
+
+  // Collect free days from today forward
+  const freeDays: string[] = [];
+  for (let i = 0; i < 21 && freeDays.length < overdue.length; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().split("T")[0];
+    const offset = toMonOffset(d.getDay());
+    const tmplType = template[offset];
+    const hasSession = sessions.some(
+      (s) =>
+        (s.movedTo === dateStr || s.plannedDate === dateStr) &&
+        s.status === "planned"
+    );
+    if ((!tmplType || tmplType === "rest") && !hasSession) {
+      freeDays.push(dateStr);
+    }
+  }
+
+  let rescheduled = 0;
+  for (let i = 0; i < overdue.length && i < freeDays.length; i++) {
+    const session = overdue[i];
+    const targetDate = freeDays[i];
+    const idx = sessions.findIndex((s) => s.id === session.id);
+    if (idx >= 0) sessions[idx] = { ...sessions[idx], status: "skipped" };
+    sessions.push({
+      id: `makeup-${Date.now()}-${i}`,
+      weekStart: getWeekStart(new Date(targetDate)),
+      plannedDate: targetDate,
+      sessionType: session.sessionType,
+      status: "planned",
+    });
+    rescheduled++;
+  }
+
+  await saveWeeklySessions(sessions);
+  return { rescheduled, sessions };
+}
